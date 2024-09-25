@@ -1,31 +1,27 @@
 const express = require('express');
 const bodyParser = require('body-parser');
 const path = require('path');
-const nodemailer = require('nodemailer'); // Import Nodemailer
+const nodemailer = require('nodemailer');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Sample student database
 const students = {
-    "2023001": { name: "John Doe", credits: 100, email: "s4srijanrajput1007@gmail.com" },
-    "2023002": { name: "Jane Smith", credits: 75, email: "jane.smith@example.com" },
-    "2023003": { name: "Alice Johnson", credits: 120, email: "alice.johnson@example.com" },
-    "2023004": { name: "Bob Williams", credits: 50, email: "bob.williams@example.com" }
+    "23BIT0042": { name: "Abhishek Kumar", credits: 100, email: "abhishek.kumar2023a@vitstudent.ac.in" },
+    "23BCT0104": { name: "Srujan Rajput", credits: 150, email: "srujan.rajput2023@vitstudent.ac.in" },
+    "23BDS0139": { name: "Divyam Pandey", credits: 120, email: "divyam.pandey2023@vitstudent.ac.in" },
+    "23BCT0079": { name: "Aditya Raj Kar", credits: 80, email: "adityaraj.kar2023@vitstudent.ac.in" }
 };
 
-// Middleware to parse JSON requests
 app.use(bodyParser.json());
 
-// Setup Nodemailer transport
 const transporter = nodemailer.createTransport({
-    service: 'gmail', // You can use any email service provider
+    service: 'gmail',
     auth: {
-        user: 's4shaddy123@gmail.com', // Replace with your email
-        pass: 'sdiy hbap rztc wlva' // Replace with your email password or app password
+        user: 's4shaddy123@gmail.com', 
+        pass: 'sdiy hbap rztc wlva'
     }
 });
 
-// API route to process shuttle payment and send email
 app.post('/api/pay', (req, res) => {
     const { studentId } = req.body;
 
@@ -42,15 +38,13 @@ app.post('/api/pay', (req, res) => {
         return res.status(400).json({ success: false, message: 'Not enough credits.' });
     }
 
-    // Deduct 20 credits
     student.credits -= 20;
 
-    // Send email via Nodemailer
     const mailOptions = {
-        from: 'your_email@gmail.com', // Replace with your email
+        from: 'your_email@gmail.com',
         to: student.email,
         subject: 'Payment Successful',
-        text: `Payment successful! 20 credits have been deducted for ${student.name}. Your current balance is ${student.credits} credits.`
+        text: Payment successful! 20 credits have been deducted for ${student.name}. Your current balance is ${student.credits} credits.
     };
 
     transporter.sendMail(mailOptions, (error, info) => {
@@ -60,16 +54,14 @@ app.post('/api/pay', (req, res) => {
         }
         res.json({
             success: true,
-            message: `Payment successful. 20 credits deducted for ${student.name}. Email sent to ${student.email}.`,
+            message: Payment successful. 20 credits deducted for ${student.name}. Email sent to ${student.email}.,
             email: student.email
         });
     });
 });
 
-// Serve static files from the "public" directory
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Start the server
 app.listen(PORT, () => {
-    console.log(`Server is running on http://localhost:${PORT}`);
+    console.log(Server is running on http://localhost:${PORT});
 });
