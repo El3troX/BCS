@@ -2,11 +2,11 @@ document.getElementById('shuttle-form').addEventListener('submit', function(even
     event.preventDefault();
 
     const studentId = document.getElementById('student-id').value.trim();
-    const statusMessage = document.getElementById('status');
+    const statusMessage = document.getElementById('statusMessage');
 
     if (!studentId) {
         statusMessage.textContent = 'Please enter a student ID.';
-        statusMessage.style.color = 'red';
+        statusMessage.className = 'status-error'; // Add error class
         return;
     }
 
@@ -20,17 +20,17 @@ document.getElementById('shuttle-form').addEventListener('submit', function(even
     .then(response => response.json())
     .then(data => {
         if (data.success) {
-            statusMessage.textContent = data.message + ` SMS sent to ${data.phoneNumber}.`;
-            statusMessage.style.color = 'green';
+            statusMessage.textContent = data.message;
+            statusMessage.className = 'status-success'; // Add success class
         } else {
             statusMessage.textContent = data.message || 'Payment failed. Please try again.';
-            statusMessage.style.color = 'red';
+            statusMessage.className = 'status-error'; // Add error class
         }
     })
     .catch((error) => {
         console.error('Error:', error);
         statusMessage.textContent = 'An error occurred. Please try again later.';
-        statusMessage.style.color = 'red';
+        statusMessage.className = 'status-error'; // Add error class
     });
 
     document.getElementById('student-id').value = '';
