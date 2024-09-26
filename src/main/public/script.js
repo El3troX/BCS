@@ -13,7 +13,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const closeHistoryBtn = document.getElementById('close-history');
 
     loginBtn.addEventListener('click', login);
-    payBtn.addEventListener('click', payForTrip);
+    payBtn.addEventListener('click', payForTrip); // Allow independent payment
     addCreditsBtn.addEventListener('click', showAddCreditsModal);
     viewHistoryBtn.addEventListener('click', viewPaymentHistory);
     blockCardBtn.addEventListener('click', blockCard);
@@ -26,13 +26,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
 function login() {
     const studentId = document.getElementById('student-id').value.trim();
-    const statusMessage = document.getElementById('statusMessage');
     if (!studentId) {
         showStatus('Please enter a student ID.', 'error');
         return;
     }
 
-    fetch('/api/pay', {
+    fetch('/api/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ studentId: studentId }),
@@ -57,50 +56,55 @@ function login() {
 }
 
 function payForTrip() {
-    if (!currentStudentId) {
-        showStatus('Please log in first.', 'error');
+    // Payment can be initiated regardless of login status
+    const studentId = document.getElementById('student-id').value.trim();
+    
+    if (!studentId) {
+        showStatus('Please enter a student ID to pay for the trip.', 'error');
         return;
     }
 
     fetch('/api/pay', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ studentId: currentStudentId }),
+        body: JSON.stringify({ studentId: studentId }), 
     })
-    .then(response => response.json())
+    .then(response => {
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        return response.json();
+    })
     .then(data => {
         if (data.success) {
-            document.getElementById('credit-balance').textContent = data.newCredits;
             showStatus(data.message, 'success');
+            document.getElementById('credit-balance').textContent = data.newCredits;
         } else {
             showStatus(data.message || 'Payment failed. Please try again.', 'error');
         }
     })
     .catch((error) => {
         console.error('Error:', error);
-        showStatus('An error occurred. Please try again later.', 'error');
+        showStatus(`An error occurred: ${error.message}. Please try again later.`, 'error');
     });
 }
 
-function showAddCreditsModal() {
-    document.getElementById('add-credits-modal').style.display = 'block';
-}
-
-function hideAddCreditsModal() {
-    document.getElementById('add-credits-modal').style.display = 'none';
-}
-
 function addCredits() {
-    const credits = document.getElementById('credits-amount').value;
-    if (!credits || credits < 1) {
+    const credits = parseInt(document.getElementById('credits-amount').value);
+    if (isNaN(credits) || credits < 1) {
         showStatus('Please enter a valid amount of credits.', 'error');
+        return;
+    }
+
+    if (!currentStudentId) {
+        showStatus('Please log in to add credits.', 'error');
         return;
     }
 
     fetch('/api/add-credits', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ studentId: currentStudentId, credits: parseInt(credits) }),
+        body: JSON.stringify({ studentId: currentStudentId, credits: credits }),
     })
     .then(response => response.json())
     .then(data => {
@@ -118,13 +122,38 @@ function addCredits() {
     });
 }
 
+function showAddCreditsModal() {
+    const modal = document.getElementById('add-credits-modal');
+    if (!modal) {
+        console.error('Add Credits Modal not found in the DOM.');
+        return;
+    }
+    modal.style.display = 'block';
+}
+
+function hideAddCreditsModal() {
+    const modal = document.getElementById('add-credits-modal');
+    if (modal) {
+        modal.style.display = 'none';
+    }
+}
+
 function viewPaymentHistory() {
+    if (!currentStudentId) {
+        showStatus('Please log in to view payment history.', 'error');
+        return;
+    }
+
     fetch(`/api/payment-history/${currentStudentId}`)
     .then(response => response.json())
     .then(data => {
         if (data.success) {
             const historyList = document.getElementById('history-list');
             historyList.innerHTML = '';
+            if (!data.history || data.history.length === 0) {
+                showStatus('No payment history found.', 'info');
+                return;
+            }
             data.history.forEach(item => {
                 const li = document.createElement('li');
                 li.textContent = `${item.timestamp}: ${item.type} - ${item.amount} credits`;
@@ -142,10 +171,18 @@ function viewPaymentHistory() {
 }
 
 function hideHistoryModal() {
-    document.getElementById('history-modal').style.display = 'none';
+    const modal = document.getElementById('history-modal');
+    if (modal) {
+        modal.style.display = 'none';
+    }
 }
 
 function blockCard() {
+    if (!currentStudentId) {
+        showStatus('Please log in to block your card.', 'error');
+        return;
+    }
+
     if (!confirm('Are you sure you want to block your card? This action cannot be undone.')) {
         return;
     }
@@ -158,8 +195,8 @@ function blockCard() {
     .then(response => response.json())
     .then(data => {
         if (data.success) {
+            document.getElementById('otp-section').style.display = 'block';
             showStatus(data.message, 'success');
-            logout();
         } else {
             showStatus(data.message || 'Failed to block card. Please try again.', 'error');
         }
@@ -169,6 +206,44 @@ function blockCard() {
         showStatus('An error occurred. Please try again later.', 'error');
     });
 }
+document.getElementById('verify-otp-button').addEventListener('click', verifyOtpAndBlock);
+function verifyOtpAndBlock() {
+    const otpInput = document.getElementById('otp-input').value.trim();
+    if (!otpInput) {
+        showStatus('Please enter an OTP.', 'error');
+        return;
+    }
+
+    fetch('/api/verify-otp-and-block', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ studentId: currentStudentId, otp: otpInput }),
+    })
+    .then(response => response.json())
+    .then(data => {
+        const otpStatusDiv = document.getElementById('otp-status');
+        if (data.success) {
+            otpStatusDiv.textContent = 'OTP verified successfully! Your card has been blocked.';
+            otpStatusDiv.className = 'success';
+
+            // Disable all buttons except "Request New Card"
+            document.querySelectorAll('.action-button').forEach(button => {
+                button.disabled = true;
+            });
+            document.getElementById('request-new-card-button').disabled = false;
+        } else {
+            otpStatusDiv.textContent = data.message || 'Invalid OTP. Please try again.';
+            otpStatusDiv.className = 'error';
+        }
+    })
+    .catch((error) => {
+        console.error('Error:', error);
+        document.getElementById('otp-status').textContent = 'An error occurred during OTP verification.';
+    });
+}
+
+// Set up the event listener for OTP verification
+
 
 function requestNewCard() {
     fetch('/api/request-new-card', {
@@ -179,14 +254,18 @@ function requestNewCard() {
     .then(response => response.json())
     .then(data => {
         if (data.success) {
-            showStatus(data.message, 'success');
+            alert(data.message);
+
+            // Enable all buttons
+            document.querySelectorAll('.action-button').forEach(button => {
+                button.disabled = false;
+            });
         } else {
-            showStatus(data.message || 'Failed to request new card. Please try again.', 'error');
+            alert('Error renewing card: ' + data.message);
         }
     })
     .catch((error) => {
         console.error('Error:', error);
-        showStatus('An error occurred. Please try again later.', 'error');
     });
 }
 
@@ -195,6 +274,8 @@ function logout() {
     document.getElementById('login-section').style.display = 'block';
     document.getElementById('main-section').style.display = 'none';
     document.getElementById('student-id').value = '';
+    document.getElementById('student-name').textContent = '';
+    document.getElementById('credit-balance').textContent = '0';
     showStatus('Logged out successfully.', 'success');
 }
 
