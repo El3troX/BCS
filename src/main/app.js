@@ -1,3 +1,4 @@
+require('dotenv').config();
 const express = require('express');
 const bodyParser = require('body-parser');
 const path = require('path');
@@ -5,14 +6,15 @@ const nodemailer = require('nodemailer');
 const mysql = require('mysql2');
 const app = express();
 const PORT = process.env.PORT || 3000;
+const crypto = require('crypto'); // Require crypto for OTP generation
 
 app.use(bodyParser.json());
 
 const db = mysql.createConnection({
-    host: 'localhost',
-    user: 'root',
-    password: 'Root',
-    database: 'studentDB'
+    host: process.env.MS_HOST,
+    user: process.env.MS_USER,
+    password: process.env.MS_PASS,
+    database: process.env.MS_DB
 });
 
 db.connect((err) => {
@@ -26,15 +28,15 @@ db.connect((err) => {
 const transporter = nodemailer.createTransport({
     service: 'gmail',
     auth: {
-        user: 's4shaddy123@gmail.com',
-        pass: 'sdiy hbap rztc wlva'
+        user: process.env.EMAIL_USER,
+        pass: process.env.EMAIL_PASS
     }
 });
 
 // Helper function to send email
 const sendEmail = (to, subject, text) => {
     const mailOptions = {
-        from: 's4shaddy123@gmail.com',
+        from: process.env.EMAIL_USER,
         to,
         subject,
         text
@@ -51,6 +53,34 @@ const sendEmail = (to, subject, text) => {
         });
     });
 };
+app.post('/api/login', async (req, res) => {
+    const { studentId } = req.body;
+
+    if (!studentId) {
+        return res.status(400).json({ success: false, message: 'Student ID is required.' });
+    }
+
+    try {
+        const [rows] = await db.promise().execute('SELECT name, credits FROM students WHERE studentid = ?', [studentId]);
+
+        if (rows.length > 0) {
+            const student = rows[0];
+            return res.json({
+                success: true,
+                name: student.name,
+                newCredits: student.credits
+            });
+        } else {
+            return res.json({
+                success: false,
+                message: 'Invalid student ID.'
+            });
+        }
+    } catch (error) {
+        console.error('Database error:', error);
+        return res.status(500).json({ success: false, message: 'An error occurred. Please try again later.' });
+    }
+});
 
 // API route to process shuttle payment
 app.post('/api/pay', (req, res) => {
@@ -109,6 +139,22 @@ app.post('/api/pay', (req, res) => {
     });
 });
 
+const checkCardStatus = (req, res, next) => {
+    const { studentId } = req.body;
+    
+    const query = 'SELECT card_status FROM students WHERE studentid = ?';
+    db.query(query, [studentId], (err, results) => {
+        if (err || results.length === 0) {
+            return res.status(500).json({ success: false, message: 'Student not found or database error.' });
+        }
+
+        if (results[0].card_status === 'blocked') {
+            return res.status(403).json({ success: false, message: 'Access Denied! Card is Blocked.' });
+        }
+
+        next(); // Proceed if card is not blocked
+    });
+};
 // API route to add credits
 app.post('/api/add-credits', (req, res) => {
     const { studentId, credits } = req.body;
@@ -173,6 +219,13 @@ app.get('/api/payment-history/:studentId', (req, res) => {
     });
 });
 
+// Function to generate a random 6-digit OTP
+const generateOtp = () => {
+    return Math.floor(100000 + Math.random() * 900000).toString();
+};
+
+let otpStorage = {}; // Temporary storage for OTPs
+
 // API route to block card
 app.post('/api/block-card', (req, res) => {
     const { studentId } = req.body;
@@ -180,71 +233,109 @@ app.post('/api/block-card', (req, res) => {
         return res.status(400).json({ success: false, message: 'Student ID is required.' });
     }
 
-    const query = 'UPDATE students SET cardBlocked = TRUE WHERE studentId = ?';
-    db.query(query, [studentId], async (err, result) => {
-        if (err) {
-            console.error('Database update error:', err);
-            return res.status(500).json({ success: false, message: 'Database error.' });
-        }
-        if (result.affectedRows === 0) {
-            return res.status(404).json({ success: false, message: 'Student not found.' });
+    // Fetch the email from the database
+    const query = 'SELECT email FROM students WHERE studentId = ?';
+    db.query(query, [studentId], async (err, results) => {
+        if (err || results.length === 0) {
+            return res.status(500).json({ success: false, message: 'Student not found.' });
         }
 
-        // Get student email
-        db.query('SELECT email FROM students WHERE studentId = ?', [studentId], async (err, results) => {
-            if (err || results.length === 0) {
-                return res.status(500).json({ success: true, message: 'Card blocked but failed to send email.' });
-            }
-            const studentEmail = results[0].email;
+        const studentEmail = results[0].email;
+        const otp = generateOtp();
+        otpStorage[studentId] = otp; // Store OTP temporarily
 
-            try {
-                await sendEmail(
-                    studentEmail,
-                    'Card Blocked',
-                    `Your card has been blocked as requested. Please contact the administration for a new card.`
-                );
+        try {
+            // Send the OTP to the student's email
+            await sendEmail(
+                studentEmail,
+                'OTP for Card Blocking',
+                `Your OTP for blocking your card is: ${otp}`
+            );
 
-                res.json({ success: true, message: 'Card blocked successfully. Email sent.' });
-            } catch (emailError) {
-                res.status(500).json({ success: true, message: 'Card blocked but failed to send email.' });
-            }
-        });
+            res.json({ success: true, message: 'OTP sent to your registered email. Please verify to block your card.' });
+        } catch (emailError) {
+            res.status(500).json({ success: false, message: 'Failed to send OTP email.' });
+        }
     });
 });
 
-// API route to request new card
+// API to verify OTP and block the card
+app.post('/api/verify-otp-and-block', (req, res) => {
+    const { studentId, otp } = req.body;
+
+    // Check if both studentId and otp are present
+    if (!studentId || !otp) {
+        return res.status(400).json({ success: false, message: 'Student ID and OTP are required.' });
+    }
+
+    // Check if OTP exists and matches the one stored
+    if (otpStorage[studentId] && otpStorage[studentId] === otp) {
+        // OTP matches, proceed with blocking the card
+        const updateStatusQuery = 'UPDATE students SET card_status = "blocked" WHERE studentId = ?';
+
+        db.query(updateStatusQuery, [studentId], (err, result) => {
+            if (err) {
+                console.error('Error updating card status:', err);
+                return res.status(500).json({ success: false, message: 'Failed to block the card. Database error occurred.' });
+            }
+
+            if (result.affectedRows === 0) {
+                // If no rows were updated, the studentId might not exist
+                return res.status(404).json({ success: false, message: 'Student ID not found. Please check and try again.' });
+            }
+
+            // Clear OTP after successful verification
+            delete otpStorage[studentId];
+
+            return res.json({ success: true, message: 'Your card has been blocked successfully.' });
+        });
+    } else {
+        // OTP does not match or doesn't exist
+        return res.status(400).json({ success: false, message: 'Invalid or expired OTP. Please try again.' });
+    }
+});
+
+
+// API route to request a new card
 app.post('/api/request-new-card', (req, res) => {
     const { studentId } = req.body;
+
     if (!studentId) {
         return res.status(400).json({ success: false, message: 'Student ID is required.' });
     }
 
     const query = 'SELECT * FROM students WHERE studentId = ?';
     db.query(query, [studentId], async (err, results) => {
-        if (err) {
-            console.error('Database query error:', err);
-            return res.status(500).json({ success: false, message: 'Database error.' });
-        }
-        if (results.length === 0) {
-            return res.status(404).json({ success: false, message: 'Student not found.' });
+        if (err || results.length === 0) {
+            return res.status(500).json({ success: false, message: 'Database error or student not found.' });
         }
 
         const student = results[0];
-
         try {
             await sendEmail(
                 student.email,
                 'New Card Request',
-                `A new card has been requested for your account. Please visit the administration office to collect your new card.`
+                'A new card has been requested for your account. Please visit the administration office to collect your new card.'
             );
 
-            // You might want to add a database entry for the new card request here
+            // Restore all features
+            const updateStatusQuery = 'UPDATE students SET card_status = "active" WHERE studentId = ?';
+            db.query(updateStatusQuery, [studentId], (updateErr) => {
+                if (updateErr) {
+                    return res.status(500).json({ success: false, message: 'Error renewing the card.' });
+                }
 
-            res.json({ success: true, message: 'New card request submitted. Email sent.' });
+                res.json({ success: true, message: 'New card request processed. Your card is now active.' });
+            });
         } catch (emailError) {
             res.status(500).json({ success: false, message: 'Failed to process new card request.' });
         }
     });
+});
+
+// Blocked status check for all other actions
+app.post('/api/perform-action', checkCardStatus, (req, res) => {
+    res.json({ success: true, message: 'Action performed successfully.' });
 });
 
 app.use(express.static(path.join(__dirname, 'public')));
