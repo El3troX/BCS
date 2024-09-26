@@ -1,25 +1,39 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>BUSIT - Shuttle System</title>
     <link rel="stylesheet" href="styles.css">
+    <style>
+        /* You can add this CSS here or in your styles.css file */
+        .highlight {
+            color: white; /* Change this to your desired color */
+        }
+    </style>
 </head>
+
 <body>
     <div class="container">
-        <h1>Welcome to BUSIT</h1>
+        <h1>Welcome to <span class="highlight">BUSIT</span></h1>
         <div id="login-section">
             <input type="text" id="student-id" placeholder="Enter your student ID" required>
             <button id="login-btn">Login</button>
+            <button id="pay-btn">Pay for Trip (20 credits)</button>
         </div>
         <div id="main-section" style="display: none;">
             <h2>Hello, <span id="student-name"></span>!</h2>
             <p>Your current balance: <span id="credit-balance"></span> credits</p>
-            <button id="pay-btn">Pay for Trip (20 credits)</button>
             <button id="add-credits-btn">Add Credits</button>
             <button id="view-history-btn">View Payment History</button>
             <button id="block-card-btn">Block Card</button>
+            <div id="otp-section" style="display: none;">
+                <label for="otp-input">Enter OTP:</label>
+                <input type="text" id="otp-input" placeholder="Enter the OTP" />
+                <button id="verify-otp-button" onclick="verifyOtpAndBlock()">Verify OTP</button>
+                <div id="otp-status"></div>
+            </div>
             <button id="request-new-card-btn">Request New Card</button>
             <button id="logout-btn">Logout</button>
         </div>
@@ -42,4 +56,5 @@
     </div>
     <script src="script.js"></script>
 </body>
+
 </html>
