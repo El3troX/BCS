@@ -1,10 +1,16 @@
 # BCS
 Bus Credit System for Hack Battle Organised by IEEE-CS (VIT)
+
 TEAM MEMBERS: 
+
 Srujan Rajput  23BCT0104
+
 Divyam Pandey  23BDS0139
+
 Abhishek Kumar 23BIT0042
+
 Aditya Raj Kar 23BCT0079
+
 Aditya Rai     23BIT0019
 
 PROBLEM: Based on our observations and feedback from other students on campus, we have found that the shuttle service is highly inefficient due to its current transaction method. During peak times, such as rush hours, class times, or lab sessions, it takes significantly longer than expected to complete transactions due to overcrowding.
