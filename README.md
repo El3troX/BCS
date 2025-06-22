@@ -3,15 +3,15 @@ Bus Credit System for Hack Battle Organised by IEEE-CS (VIT)
 
 TEAM MEMBERS: 
 
-Srujan Rajput  23BCT0104
+Srujan Rajput  23BCT0104 - https://github.com/Srujan1007
 
-Divyam Pandey  23BDS0139
+Divyam Pandey  23BDS0139 - https://github.com/El3troX
 
-Abhishek Kumar 23BIT0042
+Aditya Raj Kar 23BCT0079 - https://github.com/TRITUSLegend
 
-Aditya Raj Kar 23BCT0079
+Abhishek Kumar 23BIT0042 - https://github.com/Abhi7488-VIT
 
-Aditya Rai     23BIT0019
+Aditya Rai     23BIT0019 -
 
 PROBLEM: Based on our observations and feedback from other students on campus, we have found that the shuttle service is highly inefficient due to its current transaction method. During peak times, such as rush hours, class times, or lab sessions, it takes significantly longer than expected to complete transactions due to overcrowding.
 
