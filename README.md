@@ -1,25 +1,54 @@
-# BCS
-Bus Credit System for Hack Battle Organised by IEEE-CS (VIT)
+# 🚍 Bus Credit System (BCS)
+> 💡 A digital shuttle payment solution built for the **Hack Battle** organized by **IEEE-CS @ VIT Vellore**
 
-TEAM MEMBERS: 
+---
 
-Srujan Rajput  23BCT0104 - https://github.com/Srujan1007
+## 👥 Team Members
 
-Divyam Pandey  23BDS0139 - https://github.com/El3troX
+| Name             | Reg. No.       | GitHub |
+|------------------|----------------|--------|
+| Srujan Rajput    | 23BCT0104      | [<img src="https://img.icons8.com/ios-filled/30/000000/github.png" width="22"/>](https://github.com/Srujan1007) |
+| Divyam Pandey    | 23BDS0139      | [<img src="https://img.icons8.com/ios-filled/30/000000/github.png" width="22"/>](https://github.com/El3troX) |
+| Aditya Raj Kar   | 23BCT0079      | [<img src="https://img.icons8.com/ios-filled/30/000000/github.png" width="22"/>](https://github.com/TRITUSLegend) |
+| Abhishek Kumar   | 23BIT0042      | [<img src="https://img.icons8.com/ios-filled/30/000000/github.png" width="22"/>](https://github.com/Abhi7488-VIT) |
+| Aditya Rai       | 23BIT0019      | *No GitHub Provided* |
 
-Aditya Raj Kar 23BCT0079 - https://github.com/TRITUSLegend
+---
 
-Abhishek Kumar 23BIT0042 - https://github.com/Abhi7488-VIT
+## ❓ Problem Statement
 
-Aditya Rai     23BIT0019 -
+The current shuttle service at our campus suffers from inefficient and slow transactions, especially during peak hours—class times, lab sessions, and rush periods. Manual cash handling and UPI transactions lead to long queues, delays, and frustration among students and staff.
 
-PROBLEM: Based on our observations and feedback from other students on campus, we have found that the shuttle service is highly inefficient due to its current transaction method. During peak times, such as rush hours, class times, or lab sessions, it takes significantly longer than expected to complete transactions due to overcrowding.
+---
 
-SOLUTION: After dealing with this issue for over a year, we have developed a solution that will streamline transactions, making them more efficient and convenient by using students' ID cards. Our proposed method allows the transaction amount to be directly debited from an online wallet in the form of credits. When users add funds to their wallet, the money is converted to credits, which can then be used for transactions. On the back end, we will settle the amount equivalent to the debited credits from the students' wallets with the respective logistics provider. This system will also encourage students to carry their ID cards at all times.
+## 💡 Our Solution
 
+We developed a **Bus Credit System (BCS)** that digitizes shuttle transactions using **student ID cards**.
 
-UPDATE 1:
-Making Readme.md
+### 🔑 Key Features:
+- 💳 **ID-based payments** tied to a credit wallet.
+- 🔁 **Instant transaction** without physical cash or external apps.
+- 🔐 **Wallet system**: Top-up funds are converted to credits.
+- 🧾 **Backend reconciliation** with the shuttle service provider.
+- 📎 **Promotes ID card usage** for daily activities.
 
-UPDATE 2:
-ADDING Prototype 1
+This system drastically reduces time per transaction and encourages smoother travel experiences across campus.
+
+---
+
+## 📌 Project Status
+
+- ✅ **Prototype 1 created**
+- 📝 **README.md structured and updated**
+
+---
+
+## 🛠️ Tech Stack
+
+- HTML, CSS, JavaScript
+- MySQL for wallet data
+- Local simulation environment
+
+---
+
+> 🔗 Feel free to explore, fork, or contribute to the project!
