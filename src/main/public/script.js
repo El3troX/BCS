@@ -12,6 +12,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const confirmAddCreditsBtn = document.getElementById('confirm-add-credits');
     const cancelAddCreditsBtn = document.getElementById('cancel-add-credits');
     const closeHistoryBtn = document.getElementById('close-history');
+    const verifyOtpBtn = document.getElementById('verify-otp-button');
 
     loginBtn.addEventListener('click', login);
     if (registerBtn) registerBtn.addEventListener('click', registerStudent);
@@ -24,6 +25,7 @@ document.addEventListener('DOMContentLoaded', () => {
     confirmAddCreditsBtn.addEventListener('click', addCredits);
     cancelAddCreditsBtn.addEventListener('click', hideAddCreditsModal);
     closeHistoryBtn.addEventListener('click', hideHistoryModal);
+    if (verifyOtpBtn) verifyOtpBtn.addEventListener('click', verifyOtpAndBlock);
 
     // Check active server session on load
     checkSession();
@@ -275,7 +277,6 @@ function blockCard() {
     });
 }
 
-document.getElementById('verify-otp-button').addEventListener('click', verifyOtpAndBlock);
 function verifyOtpAndBlock() {
     const otpInput = document.getElementById('otp-input').value.trim();
     if (!otpInput) {
