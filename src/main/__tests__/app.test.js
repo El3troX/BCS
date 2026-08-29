@@ -319,10 +319,13 @@ jest.mock('mysql2', () => ({
     createPool: () => mockPool
 }));
 
+let mockSentEmails = [];
+
 // Mock nodemailer
 jest.mock('nodemailer', () => ({
     createTransport: () => ({
         sendMail: (options, callback) => {
+            mockSentEmails.push(options);
             if (callback) callback(null, { messageId: 'test-msg-id' });
             return Promise.resolve({ messageId: 'test-msg-id' });
         }
@@ -336,6 +339,7 @@ describe('BCS Bus Credit System Test Suite', () => {
     beforeEach(() => {
         resetDb();
         rowLocks.clear();
+        mockSentEmails = [];
     });
 
     describe('POST /api/login', () => {
@@ -487,6 +491,37 @@ describe('BCS Bus Credit System Test Suite', () => {
             expect(res.body.success).toBe(false);
             expect(res.body.message).toBe('Route not found.');
             expect(studentsTable['23BCE1001'].credits).toBe(100);
+        });
+
+        it('sends low-balance alert email exactly once when crossing below the threshold', async () => {
+            // Set Alice balance to 50 (above threshold 40)
+            studentsTable['23BCE1001'].credits = 50;
+
+            // 1st Payment: 50 -> 30 (crosses below 40)
+            const res1 = await request(app)
+                .post('/api/pay')
+                .set('Cookie', authCookie)
+                .send({ pin: '1234' });
+
+            expect(res1.status).toBe(200);
+            expect(res1.body.newCredits).toBe(30);
+
+            const lowBalanceAlert1 = mockSentEmails.find(e => e.subject === 'Low Balance Alert');
+            expect(lowBalanceAlert1).toBeDefined();
+            expect(lowBalanceAlert1.text).toMatch(/30 credits remaining/);
+
+            // 2nd Payment: 30 -> 10 (already below 40, does NOT cross threshold again)
+            mockSentEmails = [];
+            const res2 = await request(app)
+                .post('/api/pay')
+                .set('Cookie', authCookie)
+                .send({ pin: '1234' });
+
+            expect(res2.status).toBe(200);
+            expect(res2.body.newCredits).toBe(10);
+
+            const lowBalanceAlert2 = mockSentEmails.find(e => e.subject === 'Low Balance Alert');
+            expect(lowBalanceAlert2).toBeUndefined(); // Should not fire when already below threshold
         });
     });
 

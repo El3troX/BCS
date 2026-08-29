@@ -9,6 +9,7 @@ const session = require('express-session');
 const app = express();
 const PORT = process.env.PORT || 3000;
 const FARE_PER_TRIP = Number(process.env.FARE_PER_TRIP) || 20;
+const LOW_BALANCE_THRESHOLD = Number(process.env.LOW_BALANCE_THRESHOLD) || 40;
 const crypto = require('crypto'); // Require crypto for OTP generation
 
 if (!process.env.SESSION_SECRET) {
@@ -334,6 +335,17 @@ app.post('/api/pay', requireAuth, checkCardStatus, async (req, res) => {
                 'Payment Successful',
                 `Payment successful! ${fare} credits have been deducted for ${student.name}. Your current balance is ${newCredits} credits.`
             );
+
+            // Fire-and-forget low-balance alert when balance crosses below threshold
+            if (student.credits >= LOW_BALANCE_THRESHOLD && newCredits < LOW_BALANCE_THRESHOLD) {
+                sendEmail(
+                    student.email,
+                    'Low Balance Alert',
+                    `Warning: Your credit balance is now low (${newCredits} credits remaining). Please add credits to continue using the shuttle service.`
+                ).catch(err => {
+                    console.error('Failed to send low-balance alert email:', err);
+                });
+            }
 
             return res.json({
                 success: true,
