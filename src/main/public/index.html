@@ -39,10 +39,13 @@
 
             <!-- Route Selector for Quick Pay / Normal Ride -->
             <div class="route-selector-box">
-                <label class="input-label" for="route-select">Select Shuttle Route (Optional)</label>
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                    <label class="input-label" for="route-select" style="margin-bottom: 0;">Select Shuttle Route</label>
+                    <span id="login-fare-display" style="font-size: 0.8rem; font-weight: 700; color: #34d399;">Fare: 20 credits</span>
+                </div>
                 <div class="input-wrapper">
                     <select id="route-select">
-                        <option value="">Default Route (Standard 20 Credits)</option>
+                        <option value="">Standard fare (20 credits)</option>
                     </select>
                 </div>
             </div>
@@ -105,6 +108,19 @@
                         <div class="rfid-holder-name" id="student-name">Student Name</div>
                     </div>
                     <div class="rfid-brand">BUSIT RFID</div>
+                </div>
+            </div>
+
+            <!-- Route Selector in Dashboard -->
+            <div class="route-selector-box" style="margin-bottom: 20px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                    <label class="input-label" for="dashboard-route-select" style="margin-bottom: 0;">Select Shuttle Route</label>
+                    <span id="dashboard-fare-display" style="font-size: 0.85rem; font-weight: 700; color: #34d399;">Fare: 20 credits</span>
+                </div>
+                <div class="input-wrapper">
+                    <select id="dashboard-route-select">
+                        <option value="">Standard fare (20 credits)</option>
+                    </select>
                 </div>
             </div>
 

@@ -21,6 +21,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const routeSelect = document.getElementById('route-select');
     const historyPrevBtn = document.getElementById('history-prev-btn');
     const historyNextBtn = document.getElementById('history-next-btn');
+    const dashboardRouteSelect = document.getElementById('dashboard-route-select');
 
     if (loginBtn) loginBtn.addEventListener('click', login);
     if (registerBtn) registerBtn.addEventListener('click', registerStudent);
@@ -45,10 +46,13 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     if (routeSelect) {
-        routeSelect.addEventListener('change', updatePayButtonLabel);
+        routeSelect.addEventListener('change', () => syncRouteSelection('route-select'));
+    }
+    if (dashboardRouteSelect) {
+        dashboardRouteSelect.addEventListener('change', () => syncRouteSelection('dashboard-route-select'));
     }
 
-    // Load available shuttle routes
+    // Load available shuttle routes on page load
     loadRoutes();
 
     // Check active server session on load
@@ -60,33 +64,70 @@ function loadRoutes() {
         .then(res => res.json())
         .then(data => {
             if (data.success && Array.isArray(data.routes)) {
-                const select = document.getElementById('route-select');
-                if (!select) return;
-                // Preserve default option
-                select.innerHTML = '<option value="">Default Route (Standard 20 Credits)</option>';
-                data.routes.forEach(r => {
-                    const opt = document.createElement('option');
-                    opt.value = r.id;
-                    opt.textContent = `${r.name} (${r.fare} Credits)`;
-                    opt.dataset.fare = r.fare;
-                    select.appendChild(opt);
-                });
+                populateRouteDropdown('route-select', data.routes);
+                populateRouteDropdown('dashboard-route-select', data.routes);
+                updateFareDisplays();
             }
         })
         .catch(() => {});
 }
 
-function updatePayButtonLabel() {
-    const select = document.getElementById('route-select');
-    const label = document.getElementById('pay-btn-label');
-    if (!select || !label) return;
+function populateRouteDropdown(selectId, routes) {
+    const select = document.getElementById(selectId);
+    if (!select) return;
 
-    const selectedOpt = select.options[select.selectedIndex];
-    if (selectedOpt && selectedOpt.dataset && selectedOpt.dataset.fare) {
-        label.textContent = `Quick Tap & Pay (${selectedOpt.dataset.fare} credits)`;
-    } else {
-        label.textContent = 'Quick Tap & Pay (20 credits)';
+    const previousVal = select.value;
+    select.innerHTML = '<option value="">Standard fare (20 credits)</option>';
+    routes.forEach(r => {
+        const opt = document.createElement('option');
+        opt.value = r.id;
+        opt.textContent = `${r.name} (${r.fare} credits)`;
+        opt.dataset.fare = r.fare;
+        select.appendChild(opt);
+    });
+
+    if (previousVal) {
+        select.value = previousVal;
     }
+}
+
+function syncRouteSelection(sourceId) {
+    const source = document.getElementById(sourceId);
+    if (!source) return;
+
+    const val = source.value;
+    const targets = ['route-select', 'dashboard-route-select'].filter(id => id !== sourceId);
+    targets.forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.value = val;
+    });
+
+    updateFareDisplays();
+}
+
+function updateFareDisplays() {
+    const routeSelect = document.getElementById('route-select');
+    const dashboardRouteSelect = document.getElementById('dashboard-route-select');
+    const activeSelect = (dashboardRouteSelect && document.getElementById('main-section').style.display !== 'none') 
+        ? dashboardRouteSelect 
+        : routeSelect;
+
+    let fare = 20;
+    if (activeSelect && activeSelect.selectedIndex >= 0) {
+        const opt = activeSelect.options[activeSelect.selectedIndex];
+        if (opt && opt.dataset && opt.dataset.fare) {
+            fare = Number(opt.dataset.fare);
+        }
+    }
+
+    const loginFareDisplay = document.getElementById('login-fare-display');
+    if (loginFareDisplay) loginFareDisplay.textContent = `Fare: ${fare} credits`;
+
+    const dashboardFareDisplay = document.getElementById('dashboard-fare-display');
+    if (dashboardFareDisplay) dashboardFareDisplay.textContent = `Fare: ${fare} credits`;
+
+    const payBtnLabel = document.getElementById('pay-btn-label');
+    if (payBtnLabel) payBtnLabel.textContent = `Quick Tap & Pay (${fare} credits)`;
 }
 
 let qrScannerInstance = null;
@@ -149,6 +190,7 @@ function checkSession() {
             if (adminLink) adminLink.style.display = data.isAdmin ? 'inline-block' : 'none';
             document.getElementById('login-section').style.display = 'none';
             document.getElementById('main-section').style.display = 'block';
+            loadRoutes();
         }
     })
     .catch(() => {});
@@ -215,6 +257,7 @@ function login() {
             if (adminLink) adminLink.style.display = data.isAdmin ? 'inline-block' : 'none';
             document.getElementById('login-section').style.display = 'none';
             document.getElementById('main-section').style.display = 'block';
+            loadRoutes();
             showStatus('Welcome back, ' + (data.name || studentId) + '!', 'success');
         } else {
             showStatus(data.message || 'Login failed. Please try again.', 'error');
@@ -237,14 +280,25 @@ function payForTrip() {
         }
     }
 
-    const routeSelect = document.getElementById('route-select');
-    const routeId = routeSelect && routeSelect.value ? Number(routeSelect.value) : undefined;
+    const dashboardRouteSelect = document.getElementById('dashboard-route-select');
+    const loginRouteSelect = document.getElementById('route-select');
+    const activeSelect = (dashboardRouteSelect && document.getElementById('main-section').style.display !== 'none')
+        ? dashboardRouteSelect
+        : loginRouteSelect;
+
+    const rawRouteVal = activeSelect ? activeSelect.value : '';
+    const chosenRouteId = rawRouteVal ? Number(rawRouteVal) : undefined;
+
+    const requestBody = { pin: pin };
+    if (chosenRouteId) {
+        requestBody.routeId = chosenRouteId;
+    }
 
     fetch('/api/pay', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'same-origin',
-        body: JSON.stringify({ pin: pin, routeId: routeId }),
+        body: JSON.stringify(requestBody),
     })
     .then(response => {
         if (!response.ok) {
