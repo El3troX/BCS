@@ -6,6 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>BUSIT - Shuttle System</title>
     <link rel="stylesheet" href="styles.css">
+    <script src="https://unpkg.com/html5-qrcode"></script>
     <style>
         /* You can add this CSS here or in your styles.css file */
         .highlight {
@@ -18,7 +19,12 @@
     <div class="container">
         <h1>Welcome to <span class="highlight">BUSIT</span></h1>
         <div id="login-section">
+            <div id="qr-reader-container" style="display: none; margin-bottom: 15px;">
+                <div id="qr-reader" style="width: 100%;"></div>
+                <button id="stop-scan-btn" type="button" style="background-color: #dc3545;">Stop Scanner</button>
+            </div>
             <input type="text" id="student-id" placeholder="Enter your student ID" required>
+            <button id="scan-qr-btn" type="button" style="background-color: #17a2b8;">Scan ID Card QR</button>
             <input type="password" id="student-pin" placeholder="Enter 4-digit PIN" required>
             <button id="login-btn">Login</button>
             <button id="register-btn">Register / Set PIN</button>

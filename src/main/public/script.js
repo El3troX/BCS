@@ -13,9 +13,13 @@ document.addEventListener('DOMContentLoaded', () => {
     const cancelAddCreditsBtn = document.getElementById('cancel-add-credits');
     const closeHistoryBtn = document.getElementById('close-history');
     const verifyOtpBtn = document.getElementById('verify-otp-button');
+    const scanQrBtn = document.getElementById('scan-qr-btn');
+    const stopScanBtn = document.getElementById('stop-scan-btn');
 
     loginBtn.addEventListener('click', login);
     if (registerBtn) registerBtn.addEventListener('click', registerStudent);
+    if (scanQrBtn) scanQrBtn.addEventListener('click', startQrScanner);
+    if (stopScanBtn) stopScanBtn.addEventListener('click', stopQrScanner);
     payBtn.addEventListener('click', payForTrip); // Allow independent payment
     addCreditsBtn.addEventListener('click', showAddCreditsModal);
     viewHistoryBtn.addEventListener('click', viewPaymentHistory);
@@ -30,6 +34,53 @@ document.addEventListener('DOMContentLoaded', () => {
     // Check active server session on load
     checkSession();
 });
+
+let qrScannerInstance = null;
+
+function startQrScanner() {
+    if (typeof Html5Qrcode === 'undefined') {
+        showStatus('QR scanner library is loading. Please try again in a moment.', 'error');
+        return;
+    }
+
+    const qrContainer = document.getElementById('qr-reader-container');
+    if (qrContainer) qrContainer.style.display = 'block';
+
+    if (!qrScannerInstance) {
+        qrScannerInstance = new Html5Qrcode('qr-reader');
+    }
+
+    qrScannerInstance.start(
+        { facingMode: 'environment' },
+        { fps: 10, qrbox: { width: 250, height: 250 } },
+        (decodedText) => {
+            const studentIdInput = document.getElementById('student-id');
+            if (studentIdInput) {
+                studentIdInput.value = decodedText.trim();
+            }
+            showStatus('QR code scanned successfully: ' + decodedText.trim(), 'success');
+            stopQrScanner();
+            const pinInput = document.getElementById('student-pin');
+            if (pinInput) pinInput.focus();
+        },
+        () => {}
+    ).catch((err) => {
+        console.error('Camera access error:', err);
+        showStatus('Camera access error. Please enter your student ID manually.', 'error');
+        stopQrScanner();
+    });
+}
+
+function stopQrScanner() {
+    const qrContainer = document.getElementById('qr-reader-container');
+    if (qrContainer) qrContainer.style.display = 'none';
+
+    if (qrScannerInstance) {
+        qrScannerInstance.stop().then(() => {
+            qrScannerInstance.clear();
+        }).catch(() => {});
+    }
+}
 
 function checkSession() {
     fetch('/api/session', {
