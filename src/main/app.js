@@ -250,7 +250,39 @@ const generateOtp = () => {
     return Math.floor(100000 + Math.random() * 900000).toString();
 };
 
-let otpStorage = {}; // Temporary storage for OTPs
+const OTP_EXPIRY_MS = 5 * 60 * 1000; // 5 minutes
+const MAX_OTP_ATTEMPTS = 5;
+let otpStorage = {}; // Temporary storage for OTPs: { [studentId]: { otp, expiresAt, attempts } }
+
+const verifyAndConsumeOtp = (studentId, inputOtp) => {
+    const record = otpStorage[studentId];
+    if (!record) {
+        return { valid: false, message: 'Invalid or expired OTP. Please try again.' };
+    }
+
+    if (Date.now() > record.expiresAt) {
+        delete otpStorage[studentId];
+        return { valid: false, message: 'Invalid or expired OTP. Please try again.' };
+    }
+
+    record.attempts = (record.attempts || 0) + 1;
+
+    if (record.attempts > MAX_OTP_ATTEMPTS) {
+        delete otpStorage[studentId];
+        return { valid: false, message: 'Too many failed attempts. OTP has been invalidated.' };
+    }
+
+    if (record.otp !== inputOtp) {
+        if (record.attempts >= MAX_OTP_ATTEMPTS) {
+            delete otpStorage[studentId];
+            return { valid: false, message: 'Too many failed attempts. OTP has been invalidated.' };
+        }
+        return { valid: false, message: 'Invalid or expired OTP. Please try again.' };
+    }
+
+    delete otpStorage[studentId];
+    return { valid: true };
+};
 
 // API route to block card
 app.post('/api/block-card', (req, res) => {
@@ -268,7 +300,11 @@ app.post('/api/block-card', (req, res) => {
 
         const studentEmail = results[0].email;
         const otp = generateOtp();
-        otpStorage[studentId] = otp; // Store OTP temporarily
+        otpStorage[studentId] = {
+            otp,
+            expiresAt: Date.now() + OTP_EXPIRY_MS,
+            attempts: 0
+        };
 
         try {
             // Send the OTP to the student's email
@@ -294,31 +330,27 @@ app.post('/api/verify-otp-and-block', (req, res) => {
         return res.status(400).json({ success: false, message: 'Student ID and OTP are required.' });
     }
 
-    // Check if OTP exists and matches the one stored
-    if (otpStorage[studentId] && otpStorage[studentId] === otp) {
-        // OTP matches, proceed with blocking the card
-        const updateStatusQuery = 'UPDATE students SET card_status = "blocked" WHERE studentId = ?';
-
-        db.query(updateStatusQuery, [studentId], (err, result) => {
-            if (err) {
-                console.error('Error updating card status:', err);
-                return res.status(500).json({ success: false, message: 'Failed to block the card. Database error occurred.' });
-            }
-
-            if (result.affectedRows === 0) {
-                // If no rows were updated, the studentId might not exist
-                return res.status(404).json({ success: false, message: 'Student ID not found. Please check and try again.' });
-            }
-
-            // Clear OTP after successful verification
-            delete otpStorage[studentId];
-
-            return res.json({ success: true, message: 'Your card has been blocked successfully.' });
-        });
-    } else {
-        // OTP does not match or doesn't exist
-        return res.status(400).json({ success: false, message: 'Invalid or expired OTP. Please try again.' });
+    const verification = verifyAndConsumeOtp(studentId, otp);
+    if (!verification.valid) {
+        return res.status(400).json({ success: false, message: verification.message });
     }
+
+    // OTP is valid, proceed with blocking the card
+    const updateStatusQuery = 'UPDATE students SET card_status = "blocked" WHERE studentId = ?';
+
+    db.query(updateStatusQuery, [studentId], (err, result) => {
+        if (err) {
+            console.error('Error updating card status:', err);
+            return res.status(500).json({ success: false, message: 'Failed to block the card. Database error occurred.' });
+        }
+
+        if (result.affectedRows === 0) {
+            // If no rows were updated, the studentId might not exist
+            return res.status(404).json({ success: false, message: 'Student ID not found. Please check and try again.' });
+        }
+
+        return res.json({ success: true, message: 'Your card has been blocked successfully.' });
+    });
 });
 
 
@@ -362,11 +394,11 @@ app.post('/api/request-new-card', (req, res) => {
 
     // If OTP is provided directly, verify it
     if (otp) {
-        if (otpStorage[studentId] && otpStorage[studentId] === otp) {
-            delete otpStorage[studentId];
+        const verification = verifyAndConsumeOtp(studentId, otp);
+        if (verification.valid) {
             return handleCardReactivation(studentId, res);
         } else {
-            return res.status(400).json({ success: false, message: 'Invalid or expired OTP. Please try again.' });
+            return res.status(400).json({ success: false, message: verification.message });
         }
     }
 
@@ -378,7 +410,11 @@ app.post('/api/request-new-card', (req, res) => {
 
         const studentEmail = results[0].email;
         const generatedOtp = generateOtp();
-        otpStorage[studentId] = generatedOtp;
+        otpStorage[studentId] = {
+            otp: generatedOtp,
+            expiresAt: Date.now() + OTP_EXPIRY_MS,
+            attempts: 0
+        };
 
         try {
             await sendEmail(
@@ -402,11 +438,11 @@ app.post('/api/verify-otp-and-request-new-card', (req, res) => {
         return res.status(400).json({ success: false, message: 'Student ID and OTP are required.' });
     }
 
-    if (otpStorage[studentId] && otpStorage[studentId] === otp) {
-        delete otpStorage[studentId];
+    const verification = verifyAndConsumeOtp(studentId, otp);
+    if (verification.valid) {
         return handleCardReactivation(studentId, res);
     } else {
-        return res.status(400).json({ success: false, message: 'Invalid or expired OTP. Please try again.' });
+        return res.status(400).json({ success: false, message: verification.message });
     }
 });
 
