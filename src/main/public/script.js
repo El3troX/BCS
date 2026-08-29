@@ -210,7 +210,7 @@ function hideAddCreditsModal() {
 }
 
 function viewPaymentHistory() {
-    fetch('/api/payment-history', {
+    fetch('/api/payment-history?page=1&limit=20', {
         credentials: 'same-origin'
     })
     .then(response => response.json())

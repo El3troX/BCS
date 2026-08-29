@@ -362,17 +362,41 @@ app.post('/api/add-credits', requireAuth, checkCardStatus, async (req, res) => {
     }
 });
 
-// API route to get payment history (requires session)
-app.get('/api/payment-history', requireAuth, (req, res) => {
+// API route to get payment history (requires session, supports pagination)
+app.get('/api/payment-history', requireAuth, async (req, res) => {
     const studentId = req.session.studentId;
-    const query = 'SELECT * FROM payment_history WHERE studentId = ? ORDER BY timestamp DESC';
-    db.query(query, [studentId], (err, results) => {
-        if (err) {
-            console.error('Database query error:', err);
-            return res.status(500).json({ success: false, message: 'Database error.' });
-        }
-        res.json({ success: true, history: results });
-    });
+    let page = parseInt(req.query.page, 10);
+    let limit = parseInt(req.query.limit, 10);
+
+    if (isNaN(page) || page < 1) page = 1;
+    if (isNaN(limit) || limit < 1) limit = 20;
+    if (limit > 100) limit = 100;
+
+    const offset = (page - 1) * limit;
+
+    try {
+        const [countResult] = await db.promise().query(
+            'SELECT COUNT(*) AS total FROM payment_history WHERE studentId = ?',
+            [studentId]
+        );
+        const total = countResult[0].total;
+
+        const [results] = await db.promise().query(
+            'SELECT * FROM payment_history WHERE studentId = ? ORDER BY timestamp DESC LIMIT ? OFFSET ?',
+            [studentId, limit, offset]
+        );
+
+        return res.json({
+            success: true,
+            history: results,
+            page,
+            limit,
+            total
+        });
+    } catch (err) {
+        console.error('Database query error in payment-history:', err);
+        return res.status(500).json({ success: false, message: 'Database error.' });
+    }
 });
 
 // Function to generate a random 6-digit OTP
