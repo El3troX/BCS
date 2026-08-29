@@ -184,12 +184,17 @@ app.post('/api/pay', checkCardStatus, async (req, res) => {
 // API route to add credits
 app.post('/api/add-credits', checkCardStatus, (req, res) => {
     const { studentId, credits } = req.body;
-    if (!studentId || !credits) {
+    if (!studentId || credits === undefined || credits === null || credits === '') {
         return res.status(400).json({ success: false, message: 'Student ID and credits are required.' });
     }
 
+    const numCredits = Number(credits);
+    if (typeof credits === 'boolean' || isNaN(numCredits) || !Number.isFinite(numCredits) || numCredits <= 0 || !Number.isInteger(numCredits)) {
+        return res.status(400).json({ success: false, message: 'Invalid credits amount. Must be a positive integer.' });
+    }
+
     const query = 'UPDATE students SET credits = credits + ? WHERE studentId = ?';
-    db.query(query, [credits, studentId], async (err, result) => {
+    db.query(query, [numCredits, studentId], async (err, result) => {
         if (err) {
             console.error('Database update error:', err);
             return res.status(500).json({ success: false, message: 'Database error.' });
@@ -200,7 +205,7 @@ app.post('/api/add-credits', checkCardStatus, (req, res) => {
 
         // Insert into payment history
         const historyQuery = 'INSERT INTO payment_history (studentId, amount, type) VALUES (?, ?, ?)';
-        db.query(historyQuery, [studentId, credits, 'Credit Addition'], (err, historyResult) => {
+        db.query(historyQuery, [studentId, numCredits, 'Credit Addition'], (err, historyResult) => {
             if (err) {
                 console.error('Error inserting payment history:', err);
             }
@@ -217,12 +222,12 @@ app.post('/api/add-credits', checkCardStatus, (req, res) => {
                 await sendEmail(
                     student.email,
                     'Credits Added',
-                    `${credits} credits have been added to your account. Your new balance is ${student.credits} credits.`
+                    `${numCredits} credits have been added to your account. Your new balance is ${student.credits} credits.`
                 );
 
                 res.json({
                     success: true,
-                    message: `${credits} credits added successfully. New balance: ${student.credits}`,
+                    message: `${numCredits} credits added successfully. New balance: ${student.credits}`,
                     newCredits: student.credits
                 });
             } catch (emailError) {
