@@ -56,6 +56,18 @@ db.query("SHOW COLUMNS FROM students LIKE 'pin'", (err, results) => {
     }
 });
 
+// Ensure routes table exists
+db.query(
+    `CREATE TABLE IF NOT EXISTS routes (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        name VARCHAR(255) NOT NULL,
+        fare INT NOT NULL
+    )`,
+    (err) => {
+        if (err) console.log('Note on routes table creation:', err.message);
+    }
+);
+
 const transporter = nodemailer.createTransport({
     service: 'gmail',
     auth: {
@@ -218,16 +230,39 @@ const checkCardStatus = (req, res, next) => {
     });
 };
 
-// API route to process shuttle payment (requires session and PIN)
+// API route to list available shuttle routes
+app.get('/api/routes', (req, res) => {
+    db.query('SELECT * FROM routes ORDER BY id ASC', (err, results) => {
+        if (err) {
+            console.error('Database error fetching routes:', err);
+            return res.status(500).json({ success: false, message: 'Database error.' });
+        }
+        res.json({ success: true, routes: results });
+    });
+});
+
+// API route to process shuttle payment (requires session and PIN, optional routeId)
 app.post('/api/pay', requireAuth, checkCardStatus, async (req, res) => {
     const studentId = req.session.studentId;
-    const { pin } = req.body;
+    const { pin, routeId } = req.body;
     if (!pin) {
         return res.status(400).json({ success: false, message: 'PIN is required for payment.' });
     }
 
     let connection;
     try {
+        let fare = FARE_PER_TRIP;
+        let routeName = null;
+
+        if (routeId !== undefined && routeId !== null && routeId !== '') {
+            const [routeRows] = await db.promise().execute('SELECT * FROM routes WHERE id = ?', [routeId]);
+            if (routeRows.length === 0) {
+                return res.status(404).json({ success: false, message: 'Route not found.' });
+            }
+            fare = Number(routeRows[0].fare);
+            routeName = routeRows[0].name;
+        }
+
         connection = await db.promise().getConnection();
         await connection.beginTransaction();
 
@@ -252,21 +287,22 @@ app.post('/api/pay', requireAuth, checkCardStatus, async (req, res) => {
             }
         }
 
-        if (student.credits < FARE_PER_TRIP) {
+        if (student.credits < fare) {
             await connection.rollback();
             connection.release();
             return res.status(400).json({ success: false, message: 'Not enough credits.' });
         }
 
-        const newCredits = student.credits - FARE_PER_TRIP;
+        const newCredits = student.credits - fare;
         await connection.execute(
             'UPDATE students SET credits = ? WHERE studentId = ?',
             [newCredits, studentId]
         );
 
+        const paymentType = routeName ? `Trip Payment (${routeName})` : 'Trip Payment';
         await connection.execute(
             'INSERT INTO payment_history (studentId, amount, type) VALUES (?, ?, ?)',
-            [studentId, FARE_PER_TRIP, 'Trip Payment']
+            [studentId, fare, paymentType]
         );
 
         await connection.commit();
@@ -276,12 +312,12 @@ app.post('/api/pay', requireAuth, checkCardStatus, async (req, res) => {
             await sendEmail(
                 student.email,
                 'Payment Successful',
-                `Payment successful! ${FARE_PER_TRIP} credits have been deducted for ${student.name}. Your current balance is ${newCredits} credits.`
+                `Payment successful! ${fare} credits have been deducted for ${student.name}. Your current balance is ${newCredits} credits.`
             );
 
             return res.json({
                 success: true,
-                message: `Payment successful. ${FARE_PER_TRIP} credits deducted for ${student.name}. Email sent to ${student.email}.`,
+                message: `Payment successful. ${fare} credits deducted for ${student.name}. Email sent to ${student.email}.`,
                 email: student.email,
                 newCredits
             });

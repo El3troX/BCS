@@ -12,6 +12,7 @@ const bcrypt = require('bcrypt');
 // In-memory mock database
 let studentsTable = {};
 let historyTable = [];
+let routesTable = [];
 
 function resetDb() {
     studentsTable = {
@@ -53,6 +54,10 @@ function resetDb() {
         }
     };
     historyTable = [];
+    routesTable = [
+        { id: 1, name: 'Main Campus to Tech Park', fare: 30 },
+        { id: 2, name: 'Main Campus to Hostel Block', fare: 15 }
+    ];
 }
 
 // Global mutex to simulate SELECT ... FOR UPDATE / transaction locks
@@ -70,9 +75,20 @@ const mockConnection = () => {
             return [[{ Field: 'pin' }]];
         }
 
-        // ALTER TABLE
-        if (queryLower.includes('alter table')) {
+        // ALTER TABLE or CREATE TABLE
+        if (queryLower.includes('alter table') || queryLower.includes('create table')) {
             return [{}];
+        }
+
+        // SELECT from routes
+        if (queryLower.includes('from routes') && queryLower.includes('where id =')) {
+            const routeId = Number(params[0]);
+            const route = routesTable.find(r => r.id === routeId);
+            return [route ? [{ ...route }] : []];
+        }
+
+        if (queryLower.includes('from routes')) {
+            return [routesTable.map(r => ({ ...r }))];
         }
 
         // SELECT COUNT(*)
@@ -383,6 +399,45 @@ describe('BCS Bus Credit System Test Suite', () => {
             expect(res.status).toBe(403);
             expect(res.body.success).toBe(false);
             expect(res.body.message).toMatch(/Card is Blocked/);
+        });
+
+        it('succeeds and deducts custom route fare when routeId is provided', async () => {
+            // Route 1 fare is 30
+            const res = await request(app)
+                .post('/api/pay')
+                .set('Cookie', authCookie)
+                .send({ pin: '1234', routeId: 1 });
+
+            expect(res.status).toBe(200);
+            expect(res.body.success).toBe(true);
+            expect(res.body.newCredits).toBe(70); // 100 - 30
+            expect(studentsTable['23BCE1001'].credits).toBe(70);
+            expect(historyTable.length).toBe(1);
+            expect(historyTable[0].amount).toBe(30);
+            expect(historyTable[0].type).toBe('Trip Payment (Main Campus to Tech Park)');
+        });
+
+        it('fails with 404 when routeId is not found', async () => {
+            const res = await request(app)
+                .post('/api/pay')
+                .set('Cookie', authCookie)
+                .send({ pin: '1234', routeId: 999 });
+
+            expect(res.status).toBe(404);
+            expect(res.body.success).toBe(false);
+            expect(res.body.message).toBe('Route not found.');
+            expect(studentsTable['23BCE1001'].credits).toBe(100);
+        });
+    });
+
+    describe('GET /api/routes', () => {
+        it('returns available routes', async () => {
+            const res = await request(app).get('/api/routes');
+            expect(res.status).toBe(200);
+            expect(res.body.success).toBe(true);
+            expect(res.body.routes.length).toBe(2);
+            expect(res.body.routes[0].name).toBe('Main Campus to Tech Park');
+            expect(res.body.routes[0].fare).toBe(30);
         });
     });
 
