@@ -8,6 +8,7 @@ const bcrypt = require('bcrypt');
 const session = require('express-session');
 const app = express();
 const PORT = process.env.PORT || 3000;
+const FARE_PER_TRIP = Number(process.env.FARE_PER_TRIP) || 20;
 const crypto = require('crypto'); // Require crypto for OTP generation
 
 if (!process.env.SESSION_SECRET) {
@@ -251,13 +252,13 @@ app.post('/api/pay', requireAuth, checkCardStatus, async (req, res) => {
             }
         }
 
-        if (student.credits < 20) {
+        if (student.credits < FARE_PER_TRIP) {
             await connection.rollback();
             connection.release();
             return res.status(400).json({ success: false, message: 'Not enough credits.' });
         }
 
-        const newCredits = student.credits - 20;
+        const newCredits = student.credits - FARE_PER_TRIP;
         await connection.execute(
             'UPDATE students SET credits = ? WHERE studentId = ?',
             [newCredits, studentId]
@@ -265,7 +266,7 @@ app.post('/api/pay', requireAuth, checkCardStatus, async (req, res) => {
 
         await connection.execute(
             'INSERT INTO payment_history (studentId, amount, type) VALUES (?, ?, ?)',
-            [studentId, 20, 'Trip Payment']
+            [studentId, FARE_PER_TRIP, 'Trip Payment']
         );
 
         await connection.commit();
@@ -275,12 +276,12 @@ app.post('/api/pay', requireAuth, checkCardStatus, async (req, res) => {
             await sendEmail(
                 student.email,
                 'Payment Successful',
-                `Payment successful! 20 credits have been deducted for ${student.name}. Your current balance is ${newCredits} credits.`
+                `Payment successful! ${FARE_PER_TRIP} credits have been deducted for ${student.name}. Your current balance is ${newCredits} credits.`
             );
 
             return res.json({
                 success: true,
-                message: `Payment successful. 20 credits deducted for ${student.name}. Email sent to ${student.email}.`,
+                message: `Payment successful. ${FARE_PER_TRIP} credits deducted for ${student.name}. Email sent to ${student.email}.`,
                 email: student.email,
                 newCredits
             });
