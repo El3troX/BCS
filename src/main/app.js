@@ -322,14 +322,8 @@ app.post('/api/verify-otp-and-block', (req, res) => {
 });
 
 
-// API route to request a new card
-app.post('/api/request-new-card', (req, res) => {
-    const { studentId } = req.body;
-
-    if (!studentId) {
-        return res.status(400).json({ success: false, message: 'Student ID is required.' });
-    }
-
+// Function to handle card renewal/reactivation after OTP verification
+const handleCardReactivation = (studentId, res) => {
     const query = 'SELECT * FROM students WHERE studentId = ?';
     db.query(query, [studentId], async (err, results) => {
         if (err || results.length === 0) {
@@ -337,26 +331,83 @@ app.post('/api/request-new-card', (req, res) => {
         }
 
         const student = results[0];
-        try {
-            await sendEmail(
-                student.email,
-                'New Card Request',
-                'A new card has been requested for your account. Please visit the administration office to collect your new card.'
-            );
+        const updateStatusQuery = 'UPDATE students SET card_status = "active" WHERE studentId = ?';
+        db.query(updateStatusQuery, [studentId], async (updateErr) => {
+            if (updateErr) {
+                return res.status(500).json({ success: false, message: 'Error renewing the card.' });
+            }
 
-            // Restore all features
-            const updateStatusQuery = 'UPDATE students SET card_status = "active" WHERE studentId = ?';
-            db.query(updateStatusQuery, [studentId], (updateErr) => {
-                if (updateErr) {
-                    return res.status(500).json({ success: false, message: 'Error renewing the card.' });
-                }
+            try {
+                await sendEmail(
+                    student.email,
+                    'New Card Request',
+                    'A new card has been requested for your account. Please visit the administration office to collect your new card.'
+                );
 
                 res.json({ success: true, message: 'New card request processed. Your card is now active.' });
-            });
+            } catch (emailError) {
+                res.status(500).json({ success: false, message: 'Card reactivated but failed to send confirmation email.' });
+            }
+        });
+    });
+};
+
+// API route to request a new card (sends OTP for verification)
+app.post('/api/request-new-card', (req, res) => {
+    const { studentId, otp } = req.body;
+
+    if (!studentId) {
+        return res.status(400).json({ success: false, message: 'Student ID is required.' });
+    }
+
+    // If OTP is provided directly, verify it
+    if (otp) {
+        if (otpStorage[studentId] && otpStorage[studentId] === otp) {
+            delete otpStorage[studentId];
+            return handleCardReactivation(studentId, res);
+        } else {
+            return res.status(400).json({ success: false, message: 'Invalid or expired OTP. Please try again.' });
+        }
+    }
+
+    const query = 'SELECT email FROM students WHERE studentId = ?';
+    db.query(query, [studentId], async (err, results) => {
+        if (err || results.length === 0) {
+            return res.status(500).json({ success: false, message: 'Database error or student not found.' });
+        }
+
+        const studentEmail = results[0].email;
+        const generatedOtp = generateOtp();
+        otpStorage[studentId] = generatedOtp;
+
+        try {
+            await sendEmail(
+                studentEmail,
+                'OTP for New Card Request',
+                `Your OTP for requesting a new card is: ${generatedOtp}`
+            );
+
+            res.json({ success: true, message: 'OTP sent to your registered email. Please verify to request a new card.' });
         } catch (emailError) {
-            res.status(500).json({ success: false, message: 'Failed to process new card request.' });
+            res.status(500).json({ success: false, message: 'Failed to send OTP email.' });
         }
     });
+});
+
+// API route to verify OTP and reactivate card for new card request
+app.post('/api/verify-otp-and-request-new-card', (req, res) => {
+    const { studentId, otp } = req.body;
+
+    if (!studentId || !otp) {
+        return res.status(400).json({ success: false, message: 'Student ID and OTP are required.' });
+    }
+
+    if (otpStorage[studentId] && otpStorage[studentId] === otp) {
+        delete otpStorage[studentId];
+        return handleCardReactivation(studentId, res);
+    } else {
+        return res.status(400).json({ success: false, message: 'Invalid or expired OTP. Please try again.' });
+    }
 });
 
 // Blocked status check for all other actions

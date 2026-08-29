@@ -246,6 +246,11 @@ function verifyOtpAndBlock() {
 
 
 function requestNewCard() {
+    if (!currentStudentId) {
+        showStatus('Please log in to request a new card.', 'error');
+        return;
+    }
+
     fetch('/api/request-new-card', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -254,18 +259,40 @@ function requestNewCard() {
     .then(response => response.json())
     .then(data => {
         if (data.success) {
-            alert(data.message);
+            showStatus(data.message, 'success');
+            const otp = prompt(data.message + '\nPlease enter the OTP:');
+            if (!otp) {
+                showStatus('Card reactivation cancelled.', 'error');
+                return;
+            }
 
-            // Enable all buttons
-            document.querySelectorAll('.action-button').forEach(button => {
-                button.disabled = false;
+            fetch('/api/verify-otp-and-request-new-card', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ studentId: currentStudentId, otp: otp.trim() }),
+            })
+            .then(res => res.json())
+            .then(verifyData => {
+                if (verifyData.success) {
+                    showStatus(verifyData.message, 'success');
+                    document.querySelectorAll('.action-button').forEach(button => {
+                        button.disabled = false;
+                    });
+                } else {
+                    showStatus('Error renewing card: ' + verifyData.message, 'error');
+                }
+            })
+            .catch(err => {
+                console.error('Error verifying OTP for new card:', err);
+                showStatus('An error occurred during OTP verification.', 'error');
             });
         } else {
-            alert('Error renewing card: ' + data.message);
+            showStatus('Error requesting new card: ' + data.message, 'error');
         }
     })
     .catch((error) => {
         console.error('Error:', error);
+        showStatus('An error occurred. Please try again later.', 'error');
     });
 }
 
