@@ -10,15 +10,19 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const crypto = require('crypto'); // Require crypto for OTP generation
 
+if (!process.env.SESSION_SECRET) {
+    throw new Error('SESSION_SECRET environment variable is required.');
+}
+
 app.use(bodyParser.json());
 
 app.use(session({
-    secret: process.env.SESSION_SECRET || 'bcs-shuttle-credit-system-secret-key',
+    secret: process.env.SESSION_SECRET,
     resave: false,
     saveUninitialized: false,
     cookie: {
         httpOnly: true,
-        secure: false,
+        secure: process.env.NODE_ENV === 'production',
         maxAge: 24 * 60 * 60 * 1000 // 24 hours
     }
 }));
@@ -213,13 +217,10 @@ const checkCardStatus = (req, res, next) => {
     });
 };
 
-// API route to process shuttle payment
-app.post('/api/pay', checkCardStatus, async (req, res) => {
-    const studentId = req.session?.studentId || req.body?.studentId;
+// API route to process shuttle payment (requires session and PIN)
+app.post('/api/pay', requireAuth, checkCardStatus, async (req, res) => {
+    const studentId = req.session.studentId;
     const { pin } = req.body;
-    if (!studentId) {
-        return res.status(400).json({ success: false, message: 'Student ID is required.' });
-    }
     if (!pin) {
         return res.status(400).json({ success: false, message: 'PIN is required for payment.' });
     }
@@ -360,13 +361,9 @@ app.post('/api/add-credits', requireAuth, checkCardStatus, async (req, res) => {
     }
 });
 
-// API route to get payment history
-app.get('/api/payment-history/:studentId?', (req, res) => {
-    const studentId = req.session?.studentId || req.params.studentId;
-    if (!studentId) {
-        return res.status(400).json({ success: false, message: 'Student ID is required.' });
-    }
-
+// API route to get payment history (requires session)
+app.get('/api/payment-history', requireAuth, (req, res) => {
+    const studentId = req.session.studentId;
     const query = 'SELECT * FROM payment_history WHERE studentId = ? ORDER BY timestamp DESC';
     db.query(query, [studentId], (err, results) => {
         if (err) {

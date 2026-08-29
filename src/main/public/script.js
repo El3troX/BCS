@@ -116,14 +116,8 @@ function login() {
 }
 
 function payForTrip() {
-    // Payment can be initiated regardless of login status
-    const studentId = document.getElementById('student-id').value.trim() || currentStudentId;
     let pin = document.getElementById('student-pin') ? document.getElementById('student-pin').value.trim() : '';
 
-    if (!studentId) {
-        showStatus('Please enter a student ID to pay for the trip.', 'error');
-        return;
-    }
     if (!pin) {
         pin = prompt('Please enter your PIN to authorize payment:');
         if (!pin) {
@@ -136,7 +130,7 @@ function payForTrip() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'same-origin',
-        body: JSON.stringify({ studentId: studentId, pin: pin }), 
+        body: JSON.stringify({ pin: pin }), 
     })
     .then(response => {
         if (!response.ok) {
