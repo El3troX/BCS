@@ -56,6 +56,15 @@ db.query("SHOW COLUMNS FROM students LIKE 'pin'", (err, results) => {
     }
 });
 
+// Ensure is_admin column exists in students table
+db.query("SHOW COLUMNS FROM students LIKE 'is_admin'", (err, results) => {
+    if (!err && results && results.length === 0) {
+        db.query('ALTER TABLE students ADD COLUMN is_admin BOOLEAN DEFAULT FALSE', (alterErr) => {
+            if (alterErr) console.log('Note on adding is_admin column:', alterErr.message);
+        });
+    }
+});
+
 // Ensure routes table exists
 db.query(
     `CREATE TABLE IF NOT EXISTS routes (
@@ -105,13 +114,22 @@ const requireAuth = (req, res, next) => {
     return res.status(401).json({ success: false, message: 'Authentication required. Please log in.' });
 };
 
+// Middleware to require admin privileges
+const requireAdmin = (req, res, next) => {
+    if (req.session && req.session.studentId && req.session.isAdmin) {
+        return next();
+    }
+    return res.status(403).json({ success: false, message: 'Admin access required.' });
+};
+
 // API route to check current session status
 app.get('/api/session', (req, res) => {
     if (req.session && req.session.studentId) {
         return res.json({
             authenticated: true,
             studentId: req.session.studentId,
-            name: req.session.studentName
+            name: req.session.studentName,
+            isAdmin: Boolean(req.session.isAdmin)
         });
     }
     return res.json({ authenticated: false });
@@ -175,7 +193,7 @@ app.post('/api/login', async (req, res) => {
     }
 
     try {
-        const [rows] = await db.promise().execute('SELECT name, credits, pin FROM students WHERE studentid = ?', [studentId]);
+        const [rows] = await db.promise().execute('SELECT name, credits, pin, is_admin FROM students WHERE studentid = ?', [studentId]);
 
         if (rows.length === 0) {
             return res.json({
@@ -197,11 +215,13 @@ app.post('/api/login', async (req, res) => {
 
         req.session.studentId = studentId;
         req.session.studentName = student.name;
+        req.session.isAdmin = Boolean(student.is_admin);
 
         return res.json({
             success: true,
             name: student.name,
-            newCredits: student.credits
+            newCredits: student.credits,
+            isAdmin: req.session.isAdmin
         });
     } catch (error) {
         console.error('Database error:', error);
@@ -647,6 +667,153 @@ app.post('/api/verify-otp-and-request-new-card', requireAuth, (req, res) => {
 // Blocked status check for all other actions
 app.post('/api/perform-action', requireAuth, checkCardStatus, (req, res) => {
     res.json({ success: true, message: 'Action performed successfully.' });
+});
+
+// Admin route: list all students
+app.get('/api/admin/students', requireAdmin, async (req, res) => {
+    try {
+        const [students] = await db.promise().query(
+            'SELECT studentid AS studentId, name, email, credits, card_status, is_admin FROM students ORDER BY studentid ASC'
+        );
+        return res.json({ success: true, students });
+    } catch (err) {
+        console.error('Admin students query error:', err);
+        return res.status(500).json({ success: false, message: 'Database error.' });
+    }
+});
+
+// Admin route: list recent transactions across all students (paginated)
+app.get('/api/admin/transactions', requireAdmin, async (req, res) => {
+    let page = parseInt(req.query.page, 10);
+    let limit = parseInt(req.query.limit, 10);
+
+    if (isNaN(page) || page < 1) page = 1;
+    if (isNaN(limit) || limit < 1) limit = 20;
+    if (limit > 100) limit = 100;
+
+    const offset = (page - 1) * limit;
+
+    try {
+        const [countResult] = await db.promise().query('SELECT COUNT(*) AS total FROM payment_history');
+        const total = countResult[0].total;
+
+        const [transactions] = await db.promise().query(
+            'SELECT * FROM payment_history ORDER BY timestamp DESC LIMIT ? OFFSET ?',
+            [limit, offset]
+        );
+
+        return res.json({
+            success: true,
+            transactions,
+            page,
+            limit,
+            total
+        });
+    } catch (err) {
+        console.error('Admin transactions query error:', err);
+        return res.status(500).json({ success: false, message: 'Database error.' });
+    }
+});
+
+// Admin route: list currently blocked cards
+app.get('/api/admin/blocked-cards', requireAdmin, async (req, res) => {
+    try {
+        const [blockedStudents] = await db.promise().query(
+            'SELECT studentid AS studentId, name, email, credits, card_status FROM students WHERE card_status = "blocked" ORDER BY studentid ASC'
+        );
+        return res.json({ success: true, blockedCards: blockedStudents });
+    } catch (err) {
+        console.error('Admin blocked cards query error:', err);
+        return res.status(500).json({ success: false, message: 'Database error.' });
+    }
+});
+
+// Admin routes: CRUD for routes table
+app.post('/api/admin/routes', requireAdmin, async (req, res) => {
+    const { name, fare } = req.body;
+    if (!name || typeof name !== 'string' || !name.trim()) {
+        return res.status(400).json({ success: false, message: 'Route name is required.' });
+    }
+    const numFare = Number(fare);
+    if (isNaN(numFare) || numFare <= 0 || !Number.isInteger(numFare)) {
+        return res.status(400).json({ success: false, message: 'Fare must be a positive integer.' });
+    }
+
+    try {
+        const [result] = await db.promise().execute(
+            'INSERT INTO routes (name, fare) VALUES (?, ?)',
+            [name.trim(), numFare]
+        );
+        return res.json({
+            success: true,
+            message: 'Route created successfully.',
+            route: { id: result.insertId || 1, name: name.trim(), fare: numFare }
+        });
+    } catch (err) {
+        console.error('Admin create route error:', err);
+        return res.status(500).json({ success: false, message: 'Database error.' });
+    }
+});
+
+app.put('/api/admin/routes/:id', requireAdmin, async (req, res) => {
+    const routeId = Number(req.params.id);
+    const { name, fare } = req.body;
+
+    if (isNaN(routeId)) {
+        return res.status(400).json({ success: false, message: 'Invalid route ID.' });
+    }
+
+    let numFare = undefined;
+    if (fare !== undefined) {
+        numFare = Number(fare);
+        if (isNaN(numFare) || numFare <= 0 || !Number.isInteger(numFare)) {
+            return res.status(400).json({ success: false, message: 'Fare must be a positive integer.' });
+        }
+    }
+
+    try {
+        const [existing] = await db.promise().execute('SELECT * FROM routes WHERE id = ?', [routeId]);
+        if (existing.length === 0) {
+            return res.status(404).json({ success: false, message: 'Route not found.' });
+        }
+
+        const newName = name !== undefined ? String(name).trim() : existing[0].name;
+        const finalFare = numFare !== undefined ? numFare : existing[0].fare;
+
+        await db.promise().execute(
+            'UPDATE routes SET name = ?, fare = ? WHERE id = ?',
+            [newName, finalFare, routeId]
+        );
+
+        return res.json({
+            success: true,
+            message: 'Route updated successfully.',
+            route: { id: routeId, name: newName, fare: finalFare }
+        });
+    } catch (err) {
+        console.error('Admin update route error:', err);
+        return res.status(500).json({ success: false, message: 'Database error.' });
+    }
+});
+
+app.delete('/api/admin/routes/:id', requireAdmin, async (req, res) => {
+    const routeId = Number(req.params.id);
+    if (isNaN(routeId)) {
+        return res.status(400).json({ success: false, message: 'Invalid route ID.' });
+    }
+
+    try {
+        const [existing] = await db.promise().execute('SELECT * FROM routes WHERE id = ?', [routeId]);
+        if (existing.length === 0) {
+            return res.status(404).json({ success: false, message: 'Route not found.' });
+        }
+
+        await db.promise().execute('DELETE FROM routes WHERE id = ?', [routeId]);
+        return res.json({ success: true, message: 'Route deleted successfully.' });
+    } catch (err) {
+        console.error('Admin delete route error:', err);
+        return res.status(500).json({ success: false, message: 'Database error.' });
+    }
 });
 
 app.use(express.static(path.join(__dirname, 'public')));

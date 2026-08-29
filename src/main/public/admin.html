@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BUSIT - Admin Dashboard</title>
+    <link rel="stylesheet" href="styles.css">
+    <style>
+        .admin-container {
+            max-width: 900px;
+            width: 100%;
+            background: #ffffff;
+            color: #333;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.15);
+            margin: 20px auto;
+        }
+        .admin-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 2px solid #eee;
+            padding-bottom: 15px;
+            margin-bottom: 20px;
+        }
+        .admin-nav {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+        .admin-nav button {
+            width: auto;
+            padding: 8px 16px;
+            margin: 0;
+            background-color: #6c757d;
+        }
+        .admin-nav button.active {
+            background-color: #007bff;
+        }
+        .admin-section {
+            display: none;
+        }
+        .admin-section.active {
+            display: block;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 15px;
+        }
+        th, td {
+            padding: 10px;
+            text-align: left;
+            border-bottom: 1px solid #ddd;
+        }
+        th {
+            background-color: #f8f9fa;
+        }
+        .badge {
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: bold;
+        }
+        .badge-active { background-color: #d4edda; color: #155724; }
+        .badge-blocked { background-color: #f8d7da; color: #721c24; }
+        .badge-admin { background-color: #cce5ff; color: #004085; }
+        .route-form {
+            display: flex;
+            gap: 10px;
+            margin-top: 15px;
+            align-items: center;
+        }
+        .route-form input {
+            margin: 0;
+        }
+        .route-form button {
+            width: auto;
+            margin: 0;
+            white-space: nowrap;
+        }
+    </style>
+</head>
+<body>
+    <div class="admin-container">
+        <div class="admin-header">
+            <h2>BUSIT Admin Panel</h2>
+            <div>
+                <a href="index.html" style="margin-right: 15px; text-decoration: none; color: #007bff;">Student App</a>
+                <button id="admin-logout-btn" style="width: auto; padding: 6px 12px; margin: 0; background-color: #dc3545;">Logout</button>
+            </div>
+        </div>
+
+        <div class="admin-nav">
+            <button id="tab-students" class="active">All Students</button>
+            <button id="tab-blocked">Blocked Cards</button>
+            <button id="tab-transactions">Recent Transactions</button>
+            <button id="tab-routes">Routes & Fares</button>
+        </div>
+
+        <div id="section-students" class="admin-section active">
+            <h3>Students Registry</h3>
+            <table id="students-table">
+                <thead>
+                    <tr>
+                        <th>Student ID</th>
+                        <th>Name</th>
+                        <th>Email</th>
+                        <th>Credits</th>
+                        <th>Card Status</th>
+                        <th>Role</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </div>
+
+        <div id="section-blocked" class="admin-section">
+            <h3>Currently Blocked Cards</h3>
+            <table id="blocked-table">
+                <thead>
+                    <tr>
+                        <th>Student ID</th>
+                        <th>Name</th>
+                        <th>Email</th>
+                        <th>Credits</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </div>
+
+        <div id="section-transactions" class="admin-section">
+            <h3>System Transactions</h3>
+            <table id="transactions-table">
+                <thead>
+                    <tr>
+                        <th>Timestamp</th>
+                        <th>Student ID</th>
+                        <th>Type</th>
+                        <th>Amount</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+            <div style="margin-top: 15px; display: flex; gap: 10px; align-items: center;">
+                <button id="prev-tx-btn" style="width: auto; padding: 6px 12px; margin: 0;">Previous</button>
+                <span id="tx-page-info">Page 1</span>
+                <button id="next-tx-btn" style="width: auto; padding: 6px 12px; margin: 0;">Next</button>
+            </div>
+        </div>
+
+        <div id="section-routes" class="admin-section">
+            <h3>Manage Routes and Fares</h3>
+            <div class="route-form">
+                <input type="text" id="new-route-name" placeholder="Route Name (e.g. Campus to City)">
+                <input type="number" id="new-route-fare" placeholder="Fare" min="1">
+                <button id="add-route-btn" style="background-color: #28a745;">Add Route</button>
+            </div>
+            <table id="routes-table">
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Route Name</th>
+                        <th>Fare (Credits)</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </div>
+
+        <p id="adminStatusMessage" style="margin-top: 15px;"></p>
+    </div>
+
+    <script src="admin.js"></script>
+</body>
+</html>

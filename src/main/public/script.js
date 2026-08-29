@@ -91,6 +91,8 @@ function checkSession() {
         if (data.authenticated) {
             currentStudentId = data.studentId;
             document.getElementById('student-name').textContent = data.name || data.studentId;
+            const adminLink = document.getElementById('admin-link-btn');
+            if (adminLink) adminLink.style.display = data.isAdmin ? 'inline-block' : 'none';
             document.getElementById('login-section').style.display = 'none';
             document.getElementById('main-section').style.display = 'block';
         }
@@ -155,6 +157,8 @@ function login() {
             currentStudentId = studentId;
             document.getElementById('student-name').textContent = data.name || studentId;
             document.getElementById('credit-balance').textContent = data.newCredits;
+            const adminLink = document.getElementById('admin-link-btn');
+            if (adminLink) adminLink.style.display = data.isAdmin ? 'inline-block' : 'none';
             document.getElementById('login-section').style.display = 'none';
             document.getElementById('main-section').style.display = 'block';
             showStatus('Login successful!', 'success');

@@ -50,7 +50,18 @@ function resetDb() {
             email: 'diana@vitstudent.ac.in',
             credits: 20, // Exactly enough for 1 trip
             card_status: 'active',
-            pin: bcrypt.hashSync('9999', 10)
+            pin: bcrypt.hashSync('9999', 10),
+            is_admin: false
+        },
+        '23ADM001': {
+            studentid: '23ADM001',
+            studentId: '23ADM001',
+            name: 'Admin User',
+            email: 'admin@vit.ac.in',
+            credits: 500,
+            card_status: 'active',
+            pin: bcrypt.hashSync('0000', 10),
+            is_admin: true
         }
     };
     historyTable = [];
@@ -80,6 +91,38 @@ const mockConnection = () => {
             return [{}];
         }
 
+        // INSERT INTO routes
+        if (queryLower.includes('insert into routes')) {
+            const [name, fare] = params;
+            const newId = routesTable.length > 0 ? Math.max(...routesTable.map(r => r.id)) + 1 : 1;
+            const newRoute = { id: newId, name, fare };
+            routesTable.push(newRoute);
+            return [{ insertId: newId, affectedRows: 1 }];
+        }
+
+        // UPDATE routes
+        if (queryLower.includes('update routes set')) {
+            const [name, fare, id] = params;
+            const route = routesTable.find(r => r.id === Number(id));
+            if (route) {
+                route.name = name;
+                route.fare = fare;
+                return [{ affectedRows: 1 }];
+            }
+            return [{ affectedRows: 0 }];
+        }
+
+        // DELETE FROM routes
+        if (queryLower.includes('delete from routes')) {
+            const id = Number(params[0]);
+            const index = routesTable.findIndex(r => r.id === id);
+            if (index !== -1) {
+                routesTable.splice(index, 1);
+                return [{ affectedRows: 1 }];
+            }
+            return [{ affectedRows: 0 }];
+        }
+
         // SELECT from routes
         if (queryLower.includes('from routes') && queryLower.includes('where id =')) {
             const routeId = Number(params[0]);
@@ -93,18 +136,26 @@ const mockConnection = () => {
 
         // SELECT COUNT(*)
         if (queryLower.includes('select count(*)')) {
-            const studentId = params[0];
-            const filtered = historyTable.filter(h => h.studentId === studentId);
-            return [[{ total: filtered.length }]];
+            if (params.length > 0) {
+                const studentId = params[0];
+                const filtered = historyTable.filter(h => h.studentId === studentId);
+                return [[{ total: filtered.length }]];
+            }
+            return [[{ total: historyTable.length }]];
         }
 
         // SELECT from payment_history
         if (queryLower.includes('from payment_history')) {
-            const studentId = params[0];
-            const limit = params[1] || 20;
-            const offset = params[2] || 0;
-            const filtered = historyTable.filter(h => h.studentId === studentId);
-            return [filtered.slice(offset, offset + limit)];
+            if (queryLower.includes('where studentid =')) {
+                const studentId = params[0];
+                const limit = params[1] || 20;
+                const offset = params[2] || 0;
+                const filtered = historyTable.filter(h => h.studentId === studentId);
+                return [filtered.slice(offset, offset + limit)];
+            }
+            const limit = params[0] || 20;
+            const offset = params[1] || 0;
+            return [historyTable.slice(offset, offset + limit)];
         }
 
         // SELECT * FROM students ... FOR UPDATE
@@ -120,11 +171,20 @@ const mockConnection = () => {
             return [student ? [{ ...student }] : []];
         }
 
+        // SELECT blocked students
+        if (queryLower.includes('from students') && queryLower.includes('card_status = "blocked"')) {
+            const blocked = Object.values(studentsTable).filter(s => s.card_status === 'blocked');
+            return [blocked.map(s => ({ ...s }))];
+        }
+
         // Normal SELECT from students
         if (queryLower.includes('from students')) {
-            const studentId = params[0];
-            const student = studentsTable[studentId];
-            return [student ? [{ ...student }] : []];
+            if (queryLower.includes('where studentid =')) {
+                const studentId = params[0];
+                const student = studentsTable[studentId];
+                return [student ? [{ ...student }] : []];
+            }
+            return [Object.values(studentsTable).map(s => ({ ...s }))];
         }
 
         // UPDATE students SET credits = credits + ?
@@ -637,6 +697,116 @@ describe('BCS Bus Credit System Test Suite', () => {
 
             // Assert final balance in database is 0 (exactly 1 deduction, never negative or double-deducted)
             expect(studentsTable['23BCE1004'].credits).toBe(0);
+        });
+    });
+
+    describe('Admin Features and RBAC', () => {
+        let studentCookie;
+        let adminCookie;
+
+        beforeEach(async () => {
+            // Login regular student
+            const studentLogin = await request(app)
+                .post('/api/login')
+                .send({ studentId: '23BCE1001', pin: '1234' });
+            studentCookie = studentLogin.headers['set-cookie'];
+            expect(studentLogin.body.isAdmin).toBe(false);
+
+            // Login admin user
+            const adminLogin = await request(app)
+                .post('/api/login')
+                .send({ studentId: '23ADM001', pin: '0000' });
+            adminCookie = adminLogin.headers['set-cookie'];
+            expect(adminLogin.body.isAdmin).toBe(true);
+        });
+
+        it('rejects unauthenticated requests to admin routes with 403', async () => {
+            const res = await request(app).get('/api/admin/students');
+            expect(res.status).toBe(403);
+            expect(res.body.success).toBe(false);
+            expect(res.body.message).toMatch(/Admin access required/);
+        });
+
+        it('rejects non-admin student requests to admin routes with 403', async () => {
+            const res = await request(app)
+                .get('/api/admin/students')
+                .set('Cookie', studentCookie);
+
+            expect(res.status).toBe(403);
+            expect(res.body.success).toBe(false);
+            expect(res.body.message).toMatch(/Admin access required/);
+        });
+
+        it('allows admin to list all registered students', async () => {
+            const res = await request(app)
+                .get('/api/admin/students')
+                .set('Cookie', adminCookie);
+
+            expect(res.status).toBe(200);
+            expect(res.body.success).toBe(true);
+            expect(Array.isArray(res.body.students)).toBe(true);
+            expect(res.body.students.length).toBe(5);
+        });
+
+        it('allows admin to view all transactions paginated', async () => {
+            // Insert a transaction first
+            await request(app)
+                .post('/api/pay')
+                .set('Cookie', studentCookie)
+                .send({ pin: '1234' });
+
+            const res = await request(app)
+                .get('/api/admin/transactions?page=1&limit=10')
+                .set('Cookie', adminCookie);
+
+            expect(res.status).toBe(200);
+            expect(res.body.success).toBe(true);
+            expect(res.body.transactions.length).toBe(1);
+            expect(res.body.total).toBe(1);
+        });
+
+        it('allows admin to list currently blocked cards', async () => {
+            const res = await request(app)
+                .get('/api/admin/blocked-cards')
+                .set('Cookie', adminCookie);
+
+            expect(res.status).toBe(200);
+            expect(res.body.success).toBe(true);
+            expect(res.body.blockedCards.length).toBe(1);
+            expect(res.body.blockedCards[0].studentId).toBe('23BCE1003');
+            expect(res.body.blockedCards[0].card_status).toBe('blocked');
+        });
+
+        it('allows admin to create, update, and delete routes (CRUD)', async () => {
+            // 1. Create Route
+            const createRes = await request(app)
+                .post('/api/admin/routes')
+                .set('Cookie', adminCookie)
+                .send({ name: 'Campus to Metro Station', fare: 25 });
+
+            expect(createRes.status).toBe(200);
+            expect(createRes.body.success).toBe(true);
+            expect(createRes.body.route.name).toBe('Campus to Metro Station');
+            expect(createRes.body.route.fare).toBe(25);
+            const createdId = createRes.body.route.id;
+
+            // 2. Update Route Fare
+            const updateRes = await request(app)
+                .put(`/api/admin/routes/${createdId}`)
+                .set('Cookie', adminCookie)
+                .send({ fare: 35 });
+
+            expect(updateRes.status).toBe(200);
+            expect(updateRes.body.success).toBe(true);
+            expect(updateRes.body.route.fare).toBe(35);
+
+            // 3. Delete Route
+            const deleteRes = await request(app)
+                .delete(`/api/admin/routes/${createdId}`)
+                .set('Cookie', adminCookie);
+
+            expect(deleteRes.status).toBe(200);
+            expect(deleteRes.body.success).toBe(true);
         });
     });
 });
