@@ -455,6 +455,25 @@ describe('BCS Bus Credit System Test Suite', () => {
             expect(res.status).toBe(200);
             expect(res.body.success).toBe(true);
             expect(res.body.message).toMatch(/OTP sent/);
+            expect(app.otpStorage['23BCE1001']).toBeDefined();
+            expect(app.otpStorage['23BCE1001'].otp).toMatch(/^\d{6}$/);
+        });
+
+        it('fails when verifying with a wrong OTP', async () => {
+            await request(app)
+                .post('/api/block-card')
+                .set('Cookie', authCookie)
+                .send({ pin: '1234' });
+
+            const wrongRes = await request(app)
+                .post('/api/verify-otp-and-block')
+                .set('Cookie', authCookie)
+                .send({ otp: '000000' });
+
+            expect(wrongRes.status).toBe(400);
+            expect(wrongRes.body.success).toBe(false);
+            expect(wrongRes.body.message).toMatch(/Invalid or expired OTP/);
+            expect(studentsTable['23BCE1001'].card_status).toBe('active');
         });
 
         it('succeeds when verifying correct OTP and blocks the card', async () => {
@@ -463,16 +482,44 @@ describe('BCS Bus Credit System Test Suite', () => {
                 .set('Cookie', authCookie)
                 .send({ pin: '1234' });
 
-            // In our implementation, generated OTP was stored in app memory.
-            // Let's test wrong OTP first
-            const wrongRes = await request(app)
+            const realOtp = app.otpStorage['23BCE1001'].otp;
+            expect(realOtp).toBeDefined();
+
+            const verifyRes = await request(app)
                 .post('/api/verify-otp-and-block')
                 .set('Cookie', authCookie)
-                .send({ otp: '000000' });
+                .send({ otp: realOtp });
 
-            expect(wrongRes.status).toBe(400);
-            expect(wrongRes.body.success).toBe(false);
-            expect(studentsTable['23BCE1001'].card_status).toBe('active');
+            expect(verifyRes.status).toBe(200);
+            expect(verifyRes.body.success).toBe(true);
+            expect(verifyRes.body.message).toMatch(/blocked successfully/);
+            expect(studentsTable['23BCE1001'].card_status).toBe('blocked');
+        });
+
+        it('fails when OTP has expired past 5 minutes window', async () => {
+            await request(app)
+                .post('/api/block-card')
+                .set('Cookie', authCookie)
+                .send({ pin: '1234' });
+
+            const realOtp = app.otpStorage['23BCE1001'].otp;
+            expect(realOtp).toBeDefined();
+
+            const nowSpy = jest.spyOn(Date, 'now').mockReturnValue(Date.now() + 6 * 60 * 1000);
+
+            try {
+                const verifyRes = await request(app)
+                    .post('/api/verify-otp-and-block')
+                    .set('Cookie', authCookie)
+                    .send({ otp: realOtp });
+
+                expect(verifyRes.status).toBe(400);
+                expect(verifyRes.body.success).toBe(false);
+                expect(verifyRes.body.message).toMatch(/expired/);
+                expect(studentsTable['23BCE1001'].card_status).toBe('active');
+            } finally {
+                nowSpy.mockRestore();
+            }
         });
 
         it('fails when exceeding maximum OTP attempts', async () => {

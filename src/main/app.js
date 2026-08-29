@@ -621,6 +621,8 @@ if (require.main === module) {
     });
 }
 
+app.otpStorage = otpStorage;
+
 module.exports = app;
 
 
