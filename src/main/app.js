@@ -5,11 +5,23 @@ const path = require('path');
 const nodemailer = require('nodemailer');
 const mysql = require('mysql2');
 const bcrypt = require('bcrypt');
+const session = require('express-session');
 const app = express();
 const PORT = process.env.PORT || 3000;
 const crypto = require('crypto'); // Require crypto for OTP generation
 
 app.use(bodyParser.json());
+
+app.use(session({
+    secret: process.env.SESSION_SECRET || 'bcs-shuttle-credit-system-secret-key',
+    resave: false,
+    saveUninitialized: false,
+    cookie: {
+        httpOnly: true,
+        secure: false,
+        maxAge: 24 * 60 * 60 * 1000 // 24 hours
+    }
+}));
 
 const db = mysql.createPool({
     host: process.env.MS_HOST,
@@ -67,6 +79,41 @@ const sendEmail = (to, subject, text) => {
         });
     });
 };
+
+// Middleware to require authenticated server-side session
+const requireAuth = (req, res, next) => {
+    if (req.session && req.session.studentId) {
+        return next();
+    }
+    return res.status(401).json({ success: false, message: 'Authentication required. Please log in.' });
+};
+
+// API route to check current session status
+app.get('/api/session', (req, res) => {
+    if (req.session && req.session.studentId) {
+        return res.json({
+            authenticated: true,
+            studentId: req.session.studentId,
+            name: req.session.studentName
+        });
+    }
+    return res.json({ authenticated: false });
+});
+
+// API route to log out and destroy session
+app.post('/api/logout', (req, res) => {
+    if (req.session) {
+        req.session.destroy((err) => {
+            if (err) {
+                return res.status(500).json({ success: false, message: 'Error logging out.' });
+            }
+            res.clearCookie('connect.sid');
+            return res.json({ success: true, message: 'Logged out successfully.' });
+        });
+    } else {
+        return res.json({ success: true, message: 'Logged out successfully.' });
+    }
+});
 
 // API route to register student or set PIN
 app.post('/api/register', async (req, res) => {
@@ -131,6 +178,9 @@ app.post('/api/login', async (req, res) => {
             }
         }
 
+        req.session.studentId = studentId;
+        req.session.studentName = student.name;
+
         return res.json({
             success: true,
             name: student.name,
@@ -144,7 +194,7 @@ app.post('/api/login', async (req, res) => {
 
 // Middleware to check if card is blocked
 const checkCardStatus = (req, res, next) => {
-    const { studentId } = req.body;
+    const studentId = req.session?.studentId || req.body?.studentId || req.params?.studentId;
     if (!studentId) {
         return res.status(400).json({ success: false, message: 'Student ID is required.' });
     }
@@ -165,7 +215,8 @@ const checkCardStatus = (req, res, next) => {
 
 // API route to process shuttle payment
 app.post('/api/pay', checkCardStatus, async (req, res) => {
-    const { studentId, pin } = req.body;
+    const studentId = req.session?.studentId || req.body?.studentId;
+    const { pin } = req.body;
     if (!studentId) {
         return res.status(400).json({ success: false, message: 'Student ID is required.' });
     }
@@ -249,11 +300,12 @@ app.post('/api/pay', checkCardStatus, async (req, res) => {
     }
 });
 
-// API route to add credits
-app.post('/api/add-credits', checkCardStatus, async (req, res) => {
-    const { studentId, credits, pin } = req.body;
-    if (!studentId || credits === undefined || credits === null || credits === '') {
-        return res.status(400).json({ success: false, message: 'Student ID and credits are required.' });
+// API route to add credits (requires session and PIN)
+app.post('/api/add-credits', requireAuth, checkCardStatus, async (req, res) => {
+    const studentId = req.session.studentId;
+    const { credits, pin } = req.body;
+    if (credits === undefined || credits === null || credits === '') {
+        return res.status(400).json({ success: false, message: 'Credits amount is required.' });
     }
     if (!pin) {
         return res.status(400).json({ success: false, message: 'PIN is required to add credits.' });
@@ -309,8 +361,12 @@ app.post('/api/add-credits', checkCardStatus, async (req, res) => {
 });
 
 // API route to get payment history
-app.get('/api/payment-history/:studentId', (req, res) => {
-    const { studentId } = req.params;
+app.get('/api/payment-history/:studentId?', (req, res) => {
+    const studentId = req.session?.studentId || req.params.studentId;
+    if (!studentId) {
+        return res.status(400).json({ success: false, message: 'Student ID is required.' });
+    }
+
     const query = 'SELECT * FROM payment_history WHERE studentId = ? ORDER BY timestamp DESC';
     db.query(query, [studentId], (err, results) => {
         if (err) {
@@ -360,12 +416,10 @@ const verifyAndConsumeOtp = (studentId, inputOtp) => {
     return { valid: true };
 };
 
-// API route to block card
-app.post('/api/block-card', async (req, res) => {
-    const { studentId, pin } = req.body;
-    if (!studentId) {
-        return res.status(400).json({ success: false, message: 'Student ID is required.' });
-    }
+// API route to block card (requires session and PIN)
+app.post('/api/block-card', requireAuth, async (req, res) => {
+    const studentId = req.session.studentId;
+    const { pin } = req.body;
     if (!pin) {
         return res.status(400).json({ success: false, message: 'PIN is required to block card.' });
     }
@@ -410,13 +464,13 @@ app.post('/api/block-card', async (req, res) => {
     }
 });
 
-// API to verify OTP and block the card
-app.post('/api/verify-otp-and-block', (req, res) => {
-    const { studentId, otp } = req.body;
+// API to verify OTP and block the card (requires session)
+app.post('/api/verify-otp-and-block', requireAuth, (req, res) => {
+    const studentId = req.session.studentId;
+    const { otp } = req.body;
 
-    // Check if both studentId and otp are present
-    if (!studentId || !otp) {
-        return res.status(400).json({ success: false, message: 'Student ID and OTP are required.' });
+    if (!otp) {
+        return res.status(400).json({ success: false, message: 'OTP is required.' });
     }
 
     const verification = verifyAndConsumeOtp(studentId, otp);
@@ -434,7 +488,6 @@ app.post('/api/verify-otp-and-block', (req, res) => {
         }
 
         if (result.affectedRows === 0) {
-            // If no rows were updated, the studentId might not exist
             return res.status(404).json({ success: false, message: 'Student ID not found. Please check and try again.' });
         }
 
@@ -473,13 +526,10 @@ const handleCardReactivation = (studentId, res) => {
     });
 };
 
-// API route to request a new card (sends OTP for verification)
-app.post('/api/request-new-card', (req, res) => {
-    const { studentId, otp } = req.body;
-
-    if (!studentId) {
-        return res.status(400).json({ success: false, message: 'Student ID is required.' });
-    }
+// API route to request a new card (requires session, sends OTP for verification)
+app.post('/api/request-new-card', requireAuth, (req, res) => {
+    const studentId = req.session.studentId;
+    const { otp } = req.body;
 
     // If OTP is provided directly, verify it
     if (otp) {
@@ -519,12 +569,13 @@ app.post('/api/request-new-card', (req, res) => {
     });
 });
 
-// API route to verify OTP and reactivate card for new card request
-app.post('/api/verify-otp-and-request-new-card', (req, res) => {
-    const { studentId, otp } = req.body;
+// API route to verify OTP and reactivate card for new card request (requires session)
+app.post('/api/verify-otp-and-request-new-card', requireAuth, (req, res) => {
+    const studentId = req.session.studentId;
+    const { otp } = req.body;
 
-    if (!studentId || !otp) {
-        return res.status(400).json({ success: false, message: 'Student ID and OTP are required.' });
+    if (!otp) {
+        return res.status(400).json({ success: false, message: 'OTP is required.' });
     }
 
     const verification = verifyAndConsumeOtp(studentId, otp);
@@ -536,7 +587,7 @@ app.post('/api/verify-otp-and-request-new-card', (req, res) => {
 });
 
 // Blocked status check for all other actions
-app.post('/api/perform-action', checkCardStatus, (req, res) => {
+app.post('/api/perform-action', requireAuth, checkCardStatus, (req, res) => {
     res.json({ success: true, message: 'Action performed successfully.' });
 });
 

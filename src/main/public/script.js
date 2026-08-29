@@ -24,7 +24,26 @@ document.addEventListener('DOMContentLoaded', () => {
     confirmAddCreditsBtn.addEventListener('click', addCredits);
     cancelAddCreditsBtn.addEventListener('click', hideAddCreditsModal);
     closeHistoryBtn.addEventListener('click', hideHistoryModal);
+
+    // Check active server session on load
+    checkSession();
 });
+
+function checkSession() {
+    fetch('/api/session', {
+        credentials: 'same-origin'
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.authenticated) {
+            currentStudentId = data.studentId;
+            document.getElementById('student-name').textContent = data.name || data.studentId;
+            document.getElementById('login-section').style.display = 'none';
+            document.getElementById('main-section').style.display = 'block';
+        }
+    })
+    .catch(() => {});
+}
 
 function registerStudent() {
     const studentId = document.getElementById('student-id').value.trim();
@@ -45,6 +64,7 @@ function registerStudent() {
     fetch('/api/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
         body: JSON.stringify({ studentId, pin, name, email })
     })
     .then(response => response.json())
@@ -73,6 +93,7 @@ function login() {
     fetch('/api/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
         body: JSON.stringify({ studentId: studentId, pin: pin }),
     })
     .then(response => response.json())
@@ -114,6 +135,7 @@ function payForTrip() {
     fetch('/api/pay', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
         body: JSON.stringify({ studentId: studentId, pin: pin }), 
     })
     .then(response => {
@@ -145,11 +167,6 @@ function addCredits() {
         return;
     }
 
-    if (!currentStudentId) {
-        showStatus('Please log in to add credits.', 'error');
-        return;
-    }
-
     if (!pin) {
         pin = prompt('Please enter your PIN to confirm adding credits:');
         if (!pin) {
@@ -161,7 +178,8 @@ function addCredits() {
     fetch('/api/add-credits', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ studentId: currentStudentId, credits: credits, pin: pin }),
+        credentials: 'same-origin',
+        body: JSON.stringify({ credits: credits, pin: pin }),
     })
     .then(response => response.json())
     .then(data => {
@@ -196,12 +214,9 @@ function hideAddCreditsModal() {
 }
 
 function viewPaymentHistory() {
-    if (!currentStudentId) {
-        showStatus('Please log in to view payment history.', 'error');
-        return;
-    }
-
-    fetch(`/api/payment-history/${currentStudentId}`)
+    fetch('/api/payment-history', {
+        credentials: 'same-origin'
+    })
     .then(response => response.json())
     .then(data => {
         if (data.success) {
@@ -218,7 +233,7 @@ function viewPaymentHistory() {
             });
             document.getElementById('history-modal').style.display = 'block';
         } else {
-            showStatus('Failed to fetch payment history.', 'error');
+            showStatus(data.message || 'Failed to fetch payment history.', 'error');
         }
     })
     .catch((error) => {
@@ -235,11 +250,6 @@ function hideHistoryModal() {
 }
 
 function blockCard() {
-    if (!currentStudentId) {
-        showStatus('Please log in to block your card.', 'error');
-        return;
-    }
-
     if (!confirm('Are you sure you want to block your card? This action cannot be undone.')) {
         return;
     }
@@ -253,7 +263,8 @@ function blockCard() {
     fetch('/api/block-card', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ studentId: currentStudentId, pin: pin }),
+        credentials: 'same-origin',
+        body: JSON.stringify({ pin: pin }),
     })
     .then(response => response.json())
     .then(data => {
@@ -269,6 +280,7 @@ function blockCard() {
         showStatus('An error occurred. Please try again later.', 'error');
     });
 }
+
 document.getElementById('verify-otp-button').addEventListener('click', verifyOtpAndBlock);
 function verifyOtpAndBlock() {
     const otpInput = document.getElementById('otp-input').value.trim();
@@ -280,7 +292,8 @@ function verifyOtpAndBlock() {
     fetch('/api/verify-otp-and-block', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ studentId: currentStudentId, otp: otpInput }),
+        credentials: 'same-origin',
+        body: JSON.stringify({ otp: otpInput }),
     })
     .then(response => response.json())
     .then(data => {
@@ -289,11 +302,12 @@ function verifyOtpAndBlock() {
             otpStatusDiv.textContent = 'OTP verified successfully! Your card has been blocked.';
             otpStatusDiv.className = 'success';
 
-            // Disable all buttons except "Request New Card"
+            // Disable all buttons except Request New Card
             document.querySelectorAll('.action-button').forEach(button => {
                 button.disabled = true;
             });
-            document.getElementById('request-new-card-button').disabled = false;
+            const reqBtn = document.getElementById('request-new-card-btn') || document.getElementById('request-new-card-button');
+            if (reqBtn) reqBtn.disabled = false;
         } else {
             otpStatusDiv.textContent = data.message || 'Invalid OTP. Please try again.';
             otpStatusDiv.className = 'error';
@@ -305,19 +319,11 @@ function verifyOtpAndBlock() {
     });
 }
 
-// Set up the event listener for OTP verification
-
-
 function requestNewCard() {
-    if (!currentStudentId) {
-        showStatus('Please log in to request a new card.', 'error');
-        return;
-    }
-
     fetch('/api/request-new-card', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ studentId: currentStudentId }),
+        credentials: 'same-origin'
     })
     .then(response => response.json())
     .then(data => {
@@ -332,7 +338,8 @@ function requestNewCard() {
             fetch('/api/verify-otp-and-request-new-card', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ studentId: currentStudentId, otp: otp.trim() }),
+                credentials: 'same-origin',
+                body: JSON.stringify({ otp: otp.trim() }),
             })
             .then(res => res.json())
             .then(verifyData => {
@@ -360,13 +367,26 @@ function requestNewCard() {
 }
 
 function logout() {
-    currentStudentId = null;
-    document.getElementById('login-section').style.display = 'block';
-    document.getElementById('main-section').style.display = 'none';
-    document.getElementById('student-id').value = '';
-    document.getElementById('student-name').textContent = '';
-    document.getElementById('credit-balance').textContent = '0';
-    showStatus('Logged out successfully.', 'success');
+    fetch('/api/logout', {
+        method: 'POST',
+        credentials: 'same-origin'
+    })
+    .then(() => {
+        currentStudentId = null;
+        document.getElementById('login-section').style.display = 'block';
+        document.getElementById('main-section').style.display = 'none';
+        document.getElementById('student-id').value = '';
+        if (document.getElementById('student-pin')) {
+            document.getElementById('student-pin').value = '';
+        }
+        document.getElementById('student-name').textContent = '';
+        document.getElementById('credit-balance').textContent = '0';
+        showStatus('Logged out successfully.', 'success');
+    })
+    .catch((error) => {
+        console.error('Error logging out:', error);
+        showStatus('Logged out locally.', 'info');
+    });
 }
 
 function showStatus(message, type) {
