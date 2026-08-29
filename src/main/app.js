@@ -10,19 +10,23 @@ const crypto = require('crypto'); // Require crypto for OTP generation
 
 app.use(bodyParser.json());
 
-const db = mysql.createConnection({
+const db = mysql.createPool({
     host: process.env.MS_HOST,
     user: process.env.MS_USER,
     password: process.env.MS_PASS,
-    database: process.env.MS_DB
+    database: process.env.MS_DB,
+    waitForConnections: true,
+    connectionLimit: 10,
+    queueLimit: 0
 });
 
-db.connect((err) => {
+db.getConnection((err, conn) => {
     if (err) {
         console.error('Error connecting to the database:', err);
         return;
     }
     console.log('Connected to MySQL database.');
+    conn.release();
 });
 
 const transporter = nodemailer.createTransport({
@@ -104,60 +108,77 @@ const checkCardStatus = (req, res, next) => {
 };
 
 // API route to process shuttle payment
-app.post('/api/pay', checkCardStatus, (req, res) => {
+app.post('/api/pay', checkCardStatus, async (req, res) => {
     const { studentId } = req.body;
     if (!studentId) {
         return res.status(400).json({ success: false, message: 'Student ID is required.' });
     }
 
-    const query = 'SELECT * FROM students WHERE studentId = ?';
-    db.query(query, [studentId], (err, results) => {
-        if (err) {
-            console.error('Database query error:', err);
-            return res.status(500).json({ success: false, message: 'Database error.' });
-        }
+    let connection;
+    try {
+        connection = await db.promise().getConnection();
+        await connection.beginTransaction();
+
+        const [results] = await connection.execute(
+            'SELECT * FROM students WHERE studentId = ? FOR UPDATE',
+            [studentId]
+        );
+
         if (results.length === 0) {
+            await connection.rollback();
+            connection.release();
             return res.status(404).json({ success: false, message: 'Student not found.' });
         }
+
         const student = results[0];
         if (student.credits < 20) {
+            await connection.rollback();
+            connection.release();
             return res.status(400).json({ success: false, message: 'Not enough credits.' });
         }
 
         const newCredits = student.credits - 20;
-        const updateQuery = 'UPDATE students SET credits = ? WHERE studentId = ?';
-        db.query(updateQuery, [newCredits, studentId], async (err, updateResult) => {
-            if (err) {
-                console.error('Error updating credits:', err);
-                return res.status(500).json({ success: false, message: 'Database update error.' });
-            }
+        await connection.execute(
+            'UPDATE students SET credits = ? WHERE studentId = ?',
+            [newCredits, studentId]
+        );
 
-            // Insert into payment history
-            const historyQuery = 'INSERT INTO payment_history (studentId, amount, type) VALUES (?, ?, ?)';
-            db.query(historyQuery, [studentId, 20, 'Trip Payment'], (err, historyResult) => {
-                if (err) {
-                    console.error('Error inserting payment history:', err);
-                }
+        await connection.execute(
+            'INSERT INTO payment_history (studentId, amount, type) VALUES (?, ?, ?)',
+            [studentId, 20, 'Trip Payment']
+        );
+
+        await connection.commit();
+        connection.release();
+
+        try {
+            await sendEmail(
+                student.email,
+                'Payment Successful',
+                `Payment successful! 20 credits have been deducted for ${student.name}. Your current balance is ${newCredits} credits.`
+            );
+
+            return res.json({
+                success: true,
+                message: `Payment successful. 20 credits deducted for ${student.name}. Email sent to ${student.email}.`,
+                email: student.email,
+                newCredits
             });
-
+        } catch (emailError) {
+            return res.status(500).json({ success: false, message: 'Payment processed but failed to send email.' });
+        }
+    } catch (err) {
+        if (connection) {
             try {
-                await sendEmail(
-                    student.email,
-                    'Payment Successful',
-                    `Payment successful! 20 credits have been deducted for ${student.name}. Your current balance is ${newCredits} credits.`
-                );
-
-                res.json({
-                    success: true,
-                    message: `Payment successful. 20 credits deducted for ${student.name}. Email sent to ${student.email}.`,
-                    email: student.email,
-                    newCredits
-                });
-            } catch (emailError) {
-                res.status(500).json({ success: false, message: 'Payment processed but failed to send email.' });
+                await connection.rollback();
+            } catch (rollbackErr) {
+                console.error('Rollback error:', rollbackErr);
             }
-        });
-    });
+            connection.release();
+        }
+        console.error('Payment error:', err);
+        return res.status(500).json({ success: false, message: 'Database error.' });
+    }
 });
 
 // API route to add credits
