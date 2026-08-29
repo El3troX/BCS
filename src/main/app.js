@@ -4,6 +4,7 @@ const bodyParser = require('body-parser');
 const path = require('path');
 const nodemailer = require('nodemailer');
 const mysql = require('mysql2');
+const bcrypt = require('bcrypt');
 const app = express();
 const PORT = process.env.PORT || 3000;
 const crypto = require('crypto'); // Require crypto for OTP generation
@@ -27,6 +28,15 @@ db.getConnection((err, conn) => {
     }
     console.log('Connected to MySQL database.');
     conn.release();
+});
+
+// Ensure pin column exists in students table
+db.query("SHOW COLUMNS FROM students LIKE 'pin'", (err, results) => {
+    if (!err && results && results.length === 0) {
+        db.query('ALTER TABLE students ADD COLUMN pin VARCHAR(255)', (alterErr) => {
+            if (alterErr) console.log('Note on adding pin column:', alterErr.message);
+        });
+    }
 });
 
 const transporter = nodemailer.createTransport({
@@ -57,29 +67,75 @@ const sendEmail = (to, subject, text) => {
         });
     });
 };
+
+// API route to register student or set PIN
+app.post('/api/register', async (req, res) => {
+    const { studentId, name, email, pin } = req.body;
+    if (!studentId || !pin) {
+        return res.status(400).json({ success: false, message: 'Student ID and PIN are required.' });
+    }
+
+    const pinStr = String(pin).trim();
+    if (pinStr.length < 4) {
+        return res.status(400).json({ success: false, message: 'PIN must be at least 4 digits.' });
+    }
+
+    try {
+        const hashedPin = await bcrypt.hash(pinStr, 10);
+        const [existing] = await db.promise().execute('SELECT * FROM students WHERE studentid = ?', [studentId]);
+
+        if (existing.length > 0) {
+            await db.promise().execute(
+                'UPDATE students SET pin = ? WHERE studentid = ?',
+                [hashedPin, studentId]
+            );
+            return res.json({ success: true, message: 'PIN set successfully.' });
+        } else {
+            await db.promise().execute(
+                'INSERT INTO students (studentid, name, email, credits, card_status, pin) VALUES (?, ?, ?, ?, ?, ?)',
+                [studentId, name || studentId, email || `${studentId}@vitstudent.ac.in`, 100, 'active', hashedPin]
+            );
+            return res.json({ success: true, message: 'Student registered successfully.' });
+        }
+    } catch (err) {
+        console.error('Registration error:', err);
+        return res.status(500).json({ success: false, message: 'Database error during registration.' });
+    }
+});
+
 app.post('/api/login', async (req, res) => {
-    const { studentId } = req.body;
+    const { studentId, pin } = req.body;
 
     if (!studentId) {
         return res.status(400).json({ success: false, message: 'Student ID is required.' });
     }
 
     try {
-        const [rows] = await db.promise().execute('SELECT name, credits FROM students WHERE studentid = ?', [studentId]);
+        const [rows] = await db.promise().execute('SELECT name, credits, pin FROM students WHERE studentid = ?', [studentId]);
 
-        if (rows.length > 0) {
-            const student = rows[0];
-            return res.json({
-                success: true,
-                name: student.name,
-                newCredits: student.credits
-            });
-        } else {
+        if (rows.length === 0) {
             return res.json({
                 success: false,
                 message: 'Invalid student ID.'
             });
         }
+
+        const student = rows[0];
+        if (student.pin) {
+            if (!pin) {
+                return res.status(400).json({ success: false, message: 'PIN is required.' });
+            }
+            const isMatch = await bcrypt.compare(String(pin), student.pin);
+            if (!isMatch) {
+                return res.status(401).json({ success: false, message: 'Invalid PIN.' });
+            }
+        }
+
+        return res.json({
+            success: true,
+            name: student.name,
+            newCredits: student.credits
+        });
     } catch (error) {
         console.error('Database error:', error);
         return res.status(500).json({ success: false, message: 'An error occurred. Please try again later.' });
@@ -109,9 +165,12 @@ const checkCardStatus = (req, res, next) => {
 
 // API route to process shuttle payment
 app.post('/api/pay', checkCardStatus, async (req, res) => {
-    const { studentId } = req.body;
+    const { studentId, pin } = req.body;
     if (!studentId) {
         return res.status(400).json({ success: false, message: 'Student ID is required.' });
+    }
+    if (!pin) {
+        return res.status(400).json({ success: false, message: 'PIN is required for payment.' });
     }
 
     let connection;
@@ -131,6 +190,15 @@ app.post('/api/pay', checkCardStatus, async (req, res) => {
         }
 
         const student = results[0];
+        if (student.pin) {
+            const isPinValid = await bcrypt.compare(String(pin), student.pin);
+            if (!isPinValid) {
+                await connection.rollback();
+                connection.release();
+                return res.status(401).json({ success: false, message: 'Invalid PIN.' });
+            }
+        }
+
         if (student.credits < 20) {
             await connection.rollback();
             connection.release();
@@ -182,10 +250,13 @@ app.post('/api/pay', checkCardStatus, async (req, res) => {
 });
 
 // API route to add credits
-app.post('/api/add-credits', checkCardStatus, (req, res) => {
-    const { studentId, credits } = req.body;
+app.post('/api/add-credits', checkCardStatus, async (req, res) => {
+    const { studentId, credits, pin } = req.body;
     if (!studentId || credits === undefined || credits === null || credits === '') {
         return res.status(400).json({ success: false, message: 'Student ID and credits are required.' });
+    }
+    if (!pin) {
+        return res.status(400).json({ success: false, message: 'PIN is required to add credits.' });
     }
 
     const numCredits = Number(credits);
@@ -193,48 +264,48 @@ app.post('/api/add-credits', checkCardStatus, (req, res) => {
         return res.status(400).json({ success: false, message: 'Invalid credits amount. Must be a positive integer.' });
     }
 
-    const query = 'UPDATE students SET credits = credits + ? WHERE studentId = ?';
-    db.query(query, [numCredits, studentId], async (err, result) => {
-        if (err) {
-            console.error('Database update error:', err);
-            return res.status(500).json({ success: false, message: 'Database error.' });
-        }
-        if (result.affectedRows === 0) {
+    try {
+        const [students] = await db.promise().execute('SELECT * FROM students WHERE studentId = ?', [studentId]);
+        if (students.length === 0) {
             return res.status(404).json({ success: false, message: 'Student not found.' });
         }
 
+        const student = students[0];
+        if (student.pin) {
+            const isPinValid = await bcrypt.compare(String(pin), student.pin);
+            if (!isPinValid) {
+                return res.status(401).json({ success: false, message: 'Invalid PIN.' });
+            }
+        }
+
+        await db.promise().execute('UPDATE students SET credits = credits + ? WHERE studentId = ?', [numCredits, studentId]);
+
         // Insert into payment history
-        const historyQuery = 'INSERT INTO payment_history (studentId, amount, type) VALUES (?, ?, ?)';
-        db.query(historyQuery, [studentId, numCredits, 'Credit Addition'], (err, historyResult) => {
-            if (err) {
-                console.error('Error inserting payment history:', err);
-            }
-        });
+        await db.promise().execute('INSERT INTO payment_history (studentId, amount, type) VALUES (?, ?, ?)', [studentId, numCredits, 'Credit Addition']);
 
-        // Get updated student info
-        db.query('SELECT * FROM students WHERE studentId = ?', [studentId], async (err, results) => {
-            if (err || results.length === 0) {
-                return res.status(500).json({ success: false, message: 'Error fetching updated student info.' });
-            }
-            const student = results[0];
+        // Get updated balance
+        const [updatedRows] = await db.promise().execute('SELECT credits FROM students WHERE studentId = ?', [studentId]);
+        const updatedCredits = updatedRows[0].credits;
 
-            try {
-                await sendEmail(
-                    student.email,
-                    'Credits Added',
-                    `${numCredits} credits have been added to your account. Your new balance is ${student.credits} credits.`
-                );
+        try {
+            await sendEmail(
+                student.email,
+                'Credits Added',
+                `${numCredits} credits have been added to your account. Your new balance is ${updatedCredits} credits.`
+            );
 
-                res.json({
-                    success: true,
-                    message: `${numCredits} credits added successfully. New balance: ${student.credits}`,
-                    newCredits: student.credits
-                });
-            } catch (emailError) {
-                res.status(500).json({ success: true, message: 'Credits added but failed to send email.' });
-            }
-        });
-    });
+            return res.json({
+                success: true,
+                message: `${numCredits} credits added successfully. New balance: ${updatedCredits}`,
+                newCredits: updatedCredits
+            });
+        } catch (emailError) {
+            return res.status(500).json({ success: true, message: 'Credits added but failed to send email.' });
+        }
+    } catch (err) {
+        console.error('Database update error in add-credits:', err);
+        return res.status(500).json({ success: false, message: 'Database error.' });
+    }
 });
 
 // API route to get payment history
@@ -290,20 +361,30 @@ const verifyAndConsumeOtp = (studentId, inputOtp) => {
 };
 
 // API route to block card
-app.post('/api/block-card', (req, res) => {
-    const { studentId } = req.body;
+app.post('/api/block-card', async (req, res) => {
+    const { studentId, pin } = req.body;
     if (!studentId) {
         return res.status(400).json({ success: false, message: 'Student ID is required.' });
     }
+    if (!pin) {
+        return res.status(400).json({ success: false, message: 'PIN is required to block card.' });
+    }
 
-    // Fetch the email from the database
-    const query = 'SELECT email FROM students WHERE studentId = ?';
-    db.query(query, [studentId], async (err, results) => {
-        if (err || results.length === 0) {
+    try {
+        const [results] = await db.promise().execute('SELECT email, pin FROM students WHERE studentId = ?', [studentId]);
+        if (results.length === 0) {
             return res.status(500).json({ success: false, message: 'Student not found.' });
         }
 
-        const studentEmail = results[0].email;
+        const student = results[0];
+        if (student.pin) {
+            const isPinValid = await bcrypt.compare(String(pin), student.pin);
+            if (!isPinValid) {
+                return res.status(401).json({ success: false, message: 'Invalid PIN.' });
+            }
+        }
+
+        const studentEmail = student.email;
         const otp = generateOtp();
         otpStorage[studentId] = {
             otp,
@@ -319,11 +400,14 @@ app.post('/api/block-card', (req, res) => {
                 `Your OTP for blocking your card is: ${otp}`
             );
 
-            res.json({ success: true, message: 'OTP sent to your registered email. Please verify to block your card.' });
+            return res.json({ success: true, message: 'OTP sent to your registered email. Please verify to block your card.' });
         } catch (emailError) {
-            res.status(500).json({ success: false, message: 'Failed to send OTP email.' });
+            return res.status(500).json({ success: false, message: 'Failed to send OTP email.' });
         }
-    });
+    } catch (err) {
+        console.error('Database query error in block-card:', err);
+        return res.status(500).json({ success: false, message: 'Database error.' });
+    }
 });
 
 // API to verify OTP and block the card

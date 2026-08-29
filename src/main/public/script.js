@@ -2,6 +2,7 @@ let currentStudentId = null;
 
 document.addEventListener('DOMContentLoaded', () => {
     const loginBtn = document.getElementById('login-btn');
+    const registerBtn = document.getElementById('register-btn');
     const payBtn = document.getElementById('pay-btn');
     const addCreditsBtn = document.getElementById('add-credits-btn');
     const viewHistoryBtn = document.getElementById('view-history-btn');
@@ -13,6 +14,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const closeHistoryBtn = document.getElementById('close-history');
 
     loginBtn.addEventListener('click', login);
+    if (registerBtn) registerBtn.addEventListener('click', registerStudent);
     payBtn.addEventListener('click', payForTrip); // Allow independent payment
     addCreditsBtn.addEventListener('click', showAddCreditsModal);
     viewHistoryBtn.addEventListener('click', viewPaymentHistory);
@@ -24,8 +26,45 @@ document.addEventListener('DOMContentLoaded', () => {
     closeHistoryBtn.addEventListener('click', hideHistoryModal);
 });
 
+function registerStudent() {
+    const studentId = document.getElementById('student-id').value.trim();
+    const pin = document.getElementById('student-pin').value.trim();
+
+    if (!studentId) {
+        showStatus('Please enter a student ID.', 'error');
+        return;
+    }
+    if (!pin || pin.length < 4) {
+        showStatus('Please enter at least a 4-digit PIN.', 'error');
+        return;
+    }
+
+    const name = prompt('Enter your name (optional):') || studentId;
+    const email = prompt('Enter your email (optional):') || `${studentId}@vitstudent.ac.in`;
+
+    fetch('/api/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ studentId, pin, name, email })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            showStatus(data.message || 'Registration successful! You can now log in.', 'success');
+        } else {
+            showStatus(data.message || 'Registration failed.', 'error');
+        }
+    })
+    .catch((error) => {
+        console.error('Error:', error);
+        showStatus('An error occurred during registration.', 'error');
+    });
+}
+
 function login() {
     const studentId = document.getElementById('student-id').value.trim();
+    const pin = document.getElementById('student-pin').value.trim();
+
     if (!studentId) {
         showStatus('Please enter a student ID.', 'error');
         return;
@@ -34,7 +73,7 @@ function login() {
     fetch('/api/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ studentId: studentId }),
+        body: JSON.stringify({ studentId: studentId, pin: pin }),
     })
     .then(response => response.json())
     .then(data => {
@@ -57,21 +96,29 @@ function login() {
 
 function payForTrip() {
     // Payment can be initiated regardless of login status
-    const studentId = document.getElementById('student-id').value.trim();
-    
+    const studentId = document.getElementById('student-id').value.trim() || currentStudentId;
+    let pin = document.getElementById('student-pin') ? document.getElementById('student-pin').value.trim() : '';
+
     if (!studentId) {
         showStatus('Please enter a student ID to pay for the trip.', 'error');
         return;
+    }
+    if (!pin) {
+        pin = prompt('Please enter your PIN to authorize payment:');
+        if (!pin) {
+            showStatus('Payment cancelled. PIN is required.', 'error');
+            return;
+        }
     }
 
     fetch('/api/pay', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ studentId: studentId }), 
+        body: JSON.stringify({ studentId: studentId, pin: pin }), 
     })
     .then(response => {
         if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
+            return response.json().then(errData => { throw new Error(errData.message || `HTTP error ${response.status}`); });
         }
         return response.json();
     })
@@ -85,12 +132,14 @@ function payForTrip() {
     })
     .catch((error) => {
         console.error('Error:', error);
-        showStatus(`An error occurred: ${error.message}. Please try again later.`, 'error');
+        showStatus(`Payment failed: ${error.message}`, 'error');
     });
 }
 
 function addCredits() {
     const credits = parseInt(document.getElementById('credits-amount').value);
+    let pin = document.getElementById('credits-pin') ? document.getElementById('credits-pin').value.trim() : '';
+
     if (isNaN(credits) || credits < 1) {
         showStatus('Please enter a valid amount of credits.', 'error');
         return;
@@ -101,10 +150,18 @@ function addCredits() {
         return;
     }
 
+    if (!pin) {
+        pin = prompt('Please enter your PIN to confirm adding credits:');
+        if (!pin) {
+            showStatus('Add credits cancelled. PIN is required.', 'error');
+            return;
+        }
+    }
+
     fetch('/api/add-credits', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ studentId: currentStudentId, credits: credits }),
+        body: JSON.stringify({ studentId: currentStudentId, credits: credits, pin: pin }),
     })
     .then(response => response.json())
     .then(data => {
@@ -187,10 +244,16 @@ function blockCard() {
         return;
     }
 
+    const pin = prompt('Please enter your PIN to authorize blocking your card:');
+    if (!pin) {
+        showStatus('Card block cancelled. PIN is required.', 'error');
+        return;
+    }
+
     fetch('/api/block-card', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ studentId: currentStudentId }),
+        body: JSON.stringify({ studentId: currentStudentId, pin: pin }),
     })
     .then(response => response.json())
     .then(data => {

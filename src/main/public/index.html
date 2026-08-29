@@ -19,7 +19,9 @@
         <h1>Welcome to <span class="highlight">BUSIT</span></h1>
         <div id="login-section">
             <input type="text" id="student-id" placeholder="Enter your student ID" required>
+            <input type="password" id="student-pin" placeholder="Enter 4-digit PIN" required>
             <button id="login-btn">Login</button>
+            <button id="register-btn">Register / Set PIN</button>
             <button id="pay-btn">Pay for Trip (20 credits)</button>
         </div>
         <div id="main-section" style="display: none;">
@@ -41,6 +43,7 @@
             <div class="modal-content">
                 <h2>Add Credits</h2>
                 <input type="number" id="credits-amount" placeholder="Enter amount" min="1">
+                <input type="password" id="credits-pin" placeholder="Enter PIN">
                 <button id="confirm-add-credits">Add</button>
                 <button id="cancel-add-credits">Cancel</button>
             </div>
