@@ -82,8 +82,29 @@ app.post('/api/login', async (req, res) => {
     }
 });
 
+// Middleware to check if card is blocked
+const checkCardStatus = (req, res, next) => {
+    const { studentId } = req.body;
+    if (!studentId) {
+        return res.status(400).json({ success: false, message: 'Student ID is required.' });
+    }
+    
+    const query = 'SELECT card_status FROM students WHERE studentid = ?';
+    db.query(query, [studentId], (err, results) => {
+        if (err || results.length === 0) {
+            return res.status(500).json({ success: false, message: 'Student not found or database error.' });
+        }
+
+        if (results[0].card_status === 'blocked') {
+            return res.status(403).json({ success: false, message: 'Access Denied! Card is Blocked.' });
+        }
+
+        next(); // Proceed if card is not blocked
+    });
+};
+
 // API route to process shuttle payment
-app.post('/api/pay', (req, res) => {
+app.post('/api/pay', checkCardStatus, (req, res) => {
     const { studentId } = req.body;
     if (!studentId) {
         return res.status(400).json({ success: false, message: 'Student ID is required.' });
@@ -139,24 +160,8 @@ app.post('/api/pay', (req, res) => {
     });
 });
 
-const checkCardStatus = (req, res, next) => {
-    const { studentId } = req.body;
-    
-    const query = 'SELECT card_status FROM students WHERE studentid = ?';
-    db.query(query, [studentId], (err, results) => {
-        if (err || results.length === 0) {
-            return res.status(500).json({ success: false, message: 'Student not found or database error.' });
-        }
-
-        if (results[0].card_status === 'blocked') {
-            return res.status(403).json({ success: false, message: 'Access Denied! Card is Blocked.' });
-        }
-
-        next(); // Proceed if card is not blocked
-    });
-};
 // API route to add credits
-app.post('/api/add-credits', (req, res) => {
+app.post('/api/add-credits', checkCardStatus, (req, res) => {
     const { studentId, credits } = req.body;
     if (!studentId || !credits) {
         return res.status(400).json({ success: false, message: 'Student ID and credits are required.' });
