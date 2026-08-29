@@ -621,7 +621,9 @@ if (require.main === module) {
     });
 }
 
-app.otpStorage = otpStorage;
+if (process.env.NODE_ENV !== 'production') {
+    app.otpStorage = otpStorage;
+}
 
 module.exports = app;
 
