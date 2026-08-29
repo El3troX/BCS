@@ -1,5 +1,6 @@
 let currentTxPage = 1;
 let totalTxPages = 1;
+let toastTimeout = null;
 
 document.addEventListener('DOMContentLoaded', () => {
     checkAdminAuth();
@@ -20,7 +21,7 @@ function checkAdminAuth() {
         .then(res => res.json())
         .then(data => {
             if (!data.authenticated || !data.isAdmin) {
-                alert('Admin access required. Please log in as an administrator.');
+                alert('Admin privileges required. Redirecting to student login.');
                 window.location.href = 'index.html';
                 return;
             }
@@ -32,7 +33,7 @@ function checkAdminAuth() {
 }
 
 function switchTab(tabName) {
-    document.querySelectorAll('.admin-nav button').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.admin-tab-btn').forEach(b => b.classList.remove('active'));
     document.querySelectorAll('.admin-section').forEach(s => s.classList.remove('active'));
 
     document.getElementById(`tab-${tabName}`).classList.add('active');
@@ -51,15 +52,26 @@ function loadStudents() {
             if (data.success) {
                 const tbody = document.querySelector('#students-table tbody');
                 tbody.innerHTML = '';
+                if (!data.students || data.students.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; color:var(--text-muted);">No students registered yet.</td></tr>';
+                    return;
+                }
                 data.students.forEach(s => {
                     const tr = document.createElement('tr');
+                    const isBlocked = s.card_status === 'blocked';
                     tr.innerHTML = `
-                        <td>${s.studentId}</td>
+                        <td style="font-weight:600; font-family:monospace; color:#818cf8;">${s.studentId}</td>
                         <td>${s.name}</td>
-                        <td>${s.email || '-'}</td>
-                        <td>${s.credits}</td>
-                        <td><span class="badge ${s.card_status === 'blocked' ? 'badge-blocked' : 'badge-active'}">${s.card_status}</span></td>
-                        <td>${s.is_admin ? '<span class="badge badge-admin">Admin</span>' : 'Student'}</td>
+                        <td style="color:var(--text-secondary);">${s.email || '-'}</td>
+                        <td style="font-weight:700; color:#34d399;">${s.credits}</td>
+                        <td>
+                            <span class="card-status-pill ${isBlocked ? 'status-pill-blocked' : 'status-pill-active'}">
+                                ${isBlocked ? 'Blocked' : 'Active'}
+                            </span>
+                        </td>
+                        <td>
+                            ${s.is_admin ? '<span style="background:rgba(139,92,246,0.2); color:#c084fc; border:1px solid rgba(139,92,246,0.4); padding:3px 8px; border-radius:12px; font-size:0.75rem; font-weight:700;">Admin</span>' : '<span style="color:var(--text-muted); font-size:0.8rem;">Student</span>'}
+                        </td>
                     `;
                     tbody.appendChild(tr);
                 });
@@ -74,18 +86,18 @@ function loadBlockedCards() {
             if (data.success) {
                 const tbody = document.querySelector('#blocked-table tbody');
                 tbody.innerHTML = '';
-                if (data.blockedCards.length === 0) {
-                    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;">No blocked cards.</td></tr>';
+                if (!data.blockedCards || data.blockedCards.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color:var(--text-muted);">No blocked cards found in system.</td></tr>';
                     return;
                 }
                 data.blockedCards.forEach(s => {
                     const tr = document.createElement('tr');
                     tr.innerHTML = `
-                        <td>${s.studentId}</td>
+                        <td style="font-weight:600; font-family:monospace; color:#fb7185;">${s.studentId}</td>
                         <td>${s.name}</td>
-                        <td>${s.email || '-'}</td>
-                        <td>${s.credits}</td>
-                        <td><span class="badge badge-blocked">${s.card_status}</span></td>
+                        <td style="color:var(--text-secondary);">${s.email || '-'}</td>
+                        <td style="font-weight:700;">${s.credits}</td>
+                        <td><span class="card-status-pill status-pill-blocked">Blocked</span></td>
                     `;
                     tbody.appendChild(tr);
                 });
@@ -102,19 +114,25 @@ function loadTransactions(page = 1) {
                 const tbody = document.querySelector('#transactions-table tbody');
                 tbody.innerHTML = '';
                 totalTxPages = Math.ceil((data.total || 1) / 10) || 1;
-                document.getElementById('tx-page-info').textContent = `Page ${data.page} of ${totalTxPages} (Total: ${data.total})`;
+                const pageInfo = document.getElementById('tx-page-info');
+                if (pageInfo) pageInfo.textContent = `Page ${data.page} of ${totalTxPages} (${data.total} total)`;
 
-                if (data.transactions.length === 0) {
-                    tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;">No transactions found.</td></tr>';
+                if (!data.transactions || data.transactions.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; color:var(--text-muted);">No transactions recorded.</td></tr>';
                     return;
                 }
                 data.transactions.forEach(t => {
                     const tr = document.createElement('tr');
+                    const formattedDate = t.timestamp ? new Date(t.timestamp).toLocaleString() : '-';
+                    const isCreditAdd = (t.type || '').toLowerCase().includes('credit') || (t.type || '').toLowerCase().includes('deposit');
+
                     tr.innerHTML = `
-                        <td>${t.timestamp}</td>
-                        <td>${t.studentId}</td>
+                        <td style="color:var(--text-muted); font-size:0.8rem;">${formattedDate}</td>
+                        <td style="font-family:monospace; font-weight:600;">${t.studentId}</td>
                         <td>${t.type}</td>
-                        <td>${t.amount} credits</td>
+                        <td style="font-weight:700; color:${isCreditAdd ? '#34d399' : '#fb7185'};">
+                            ${isCreditAdd ? '+' : '-'}${t.amount} credits
+                        </td>
                     `;
                     tbody.appendChild(tr);
                 });
@@ -129,15 +147,19 @@ function loadRoutes() {
             if (data.success) {
                 const tbody = document.querySelector('#routes-table tbody');
                 tbody.innerHTML = '';
+                if (!data.routes || data.routes.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; color:var(--text-muted);">No custom routes configured yet.</td></tr>';
+                    return;
+                }
                 data.routes.forEach(r => {
                     const tr = document.createElement('tr');
                     tr.innerHTML = `
-                        <td>${r.id}</td>
-                        <td>${r.name}</td>
-                        <td>${r.fare}</td>
+                        <td style="color:var(--text-muted);">${r.id}</td>
+                        <td style="font-weight:600; color:#fff;">${r.name}</td>
+                        <td style="font-weight:700; color:#818cf8;">${r.fare} credits</td>
                         <td>
-                            <button onclick="editRouteFare(${r.id}, ${r.fare})" style="width:auto; padding:4px 8px; margin-right:5px;">Edit Fare</button>
-                            <button onclick="deleteRoute(${r.id})" style="width:auto; padding:4px 8px; background-color:#dc3545;">Delete</button>
+                            <button onclick="editRouteFare(${r.id}, ${r.fare})" class="btn-secondary action-btn-sm" style="margin-right:6px;">Edit Fare</button>
+                            <button onclick="deleteRoute(${r.id})" class="btn-secondary action-btn-sm" style="color:#fb7185; border-color:rgba(244,63,94,0.3);">Delete</button>
                         </td>
                     `;
                     tbody.appendChild(tr);
@@ -151,7 +173,7 @@ function addRoute() {
     const fare = parseInt(document.getElementById('new-route-fare').value, 10);
 
     if (!name || isNaN(fare) || fare <= 0) {
-        alert('Please enter a valid route name and positive fare.');
+        showStatus('Please provide a route name and positive fare.', 'error');
         return;
     }
 
@@ -166,19 +188,20 @@ function addRoute() {
         if (data.success) {
             document.getElementById('new-route-name').value = '';
             document.getElementById('new-route-fare').value = '';
+            showStatus('Route added successfully!', 'success');
             loadRoutes();
         } else {
-            alert(data.message || 'Failed to add route.');
+            showStatus(data.message || 'Failed to add route.', 'error');
         }
     });
 }
 
 window.editRouteFare = function(id, currentFare) {
-    const newFare = prompt('Enter new fare for route ID ' + id + ':', currentFare);
+    const newFare = prompt(`Enter new fare (credits) for route ID ${id}:`, currentFare);
     if (!newFare) return;
     const num = parseInt(newFare, 10);
     if (isNaN(num) || num <= 0) {
-        alert('Invalid fare amount.');
+        showStatus('Invalid fare amount.', 'error');
         return;
     }
 
@@ -191,15 +214,16 @@ window.editRouteFare = function(id, currentFare) {
     .then(res => res.json())
     .then(data => {
         if (data.success) {
+            showStatus('Route fare updated!', 'success');
             loadRoutes();
         } else {
-            alert(data.message || 'Failed to update route fare.');
+            showStatus(data.message || 'Failed to update fare.', 'error');
         }
     });
 };
 
 window.deleteRoute = function(id) {
-    if (!confirm('Are you sure you want to delete route ID ' + id + '?')) return;
+    if (!confirm(`Are you sure you want to delete route #${id}?`)) return;
 
     fetch(`/api/admin/routes/${id}`, {
         method: 'DELETE',
@@ -208,9 +232,10 @@ window.deleteRoute = function(id) {
     .then(res => res.json())
     .then(data => {
         if (data.success) {
+            showStatus('Route deleted.', 'success');
             loadRoutes();
         } else {
-            alert(data.message || 'Failed to delete route.');
+            showStatus(data.message || 'Failed to delete route.', 'error');
         }
     });
 };
@@ -220,4 +245,19 @@ function adminLogout() {
         .then(() => {
             window.location.href = 'index.html';
         });
+}
+
+function showStatus(message, type) {
+    const statusMessage = document.getElementById('statusMessage');
+    if (!statusMessage) return;
+
+    if (toastTimeout) clearTimeout(toastTimeout);
+
+    statusMessage.textContent = message;
+    statusMessage.className = type === 'error' ? 'status-error' : 'status-success';
+    statusMessage.style.display = 'block';
+
+    toastTimeout = setTimeout(() => {
+        statusMessage.style.display = 'none';
+    }, 3500);
 }

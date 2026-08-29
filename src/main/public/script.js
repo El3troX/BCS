@@ -1,4 +1,7 @@
 let currentStudentId = null;
+let currentHistoryPage = 1;
+let totalHistoryPages = 1;
+let toastTimeout = null;
 
 document.addEventListener('DOMContentLoaded', () => {
     const loginBtn = document.getElementById('login-btn');
@@ -15,25 +18,76 @@ document.addEventListener('DOMContentLoaded', () => {
     const verifyOtpBtn = document.getElementById('verify-otp-button');
     const scanQrBtn = document.getElementById('scan-qr-btn');
     const stopScanBtn = document.getElementById('stop-scan-btn');
+    const routeSelect = document.getElementById('route-select');
+    const historyPrevBtn = document.getElementById('history-prev-btn');
+    const historyNextBtn = document.getElementById('history-next-btn');
 
-    loginBtn.addEventListener('click', login);
+    if (loginBtn) loginBtn.addEventListener('click', login);
     if (registerBtn) registerBtn.addEventListener('click', registerStudent);
     if (scanQrBtn) scanQrBtn.addEventListener('click', startQrScanner);
     if (stopScanBtn) stopScanBtn.addEventListener('click', stopQrScanner);
-    payBtn.addEventListener('click', payForTrip); // Allow independent payment
-    addCreditsBtn.addEventListener('click', showAddCreditsModal);
-    viewHistoryBtn.addEventListener('click', viewPaymentHistory);
-    blockCardBtn.addEventListener('click', blockCard);
-    requestNewCardBtn.addEventListener('click', requestNewCard);
-    logoutBtn.addEventListener('click', logout);
-    confirmAddCreditsBtn.addEventListener('click', addCredits);
-    cancelAddCreditsBtn.addEventListener('click', hideAddCreditsModal);
-    closeHistoryBtn.addEventListener('click', hideHistoryModal);
+    if (payBtn) payBtn.addEventListener('click', payForTrip);
+    if (addCreditsBtn) addCreditsBtn.addEventListener('click', showAddCreditsModal);
+    if (viewHistoryBtn) viewHistoryBtn.addEventListener('click', () => viewPaymentHistory(1));
+    if (blockCardBtn) blockCardBtn.addEventListener('click', blockCard);
+    if (requestNewCardBtn) requestNewCardBtn.addEventListener('click', requestNewCard);
+    if (logoutBtn) logoutBtn.addEventListener('click', logout);
+    if (confirmAddCreditsBtn) confirmAddCreditsBtn.addEventListener('click', addCredits);
+    if (cancelAddCreditsBtn) cancelAddCreditsBtn.addEventListener('click', hideAddCreditsModal);
+    if (closeHistoryBtn) closeHistoryBtn.addEventListener('click', hideHistoryModal);
     if (verifyOtpBtn) verifyOtpBtn.addEventListener('click', verifyOtpAndBlock);
+
+    if (historyPrevBtn) historyPrevBtn.addEventListener('click', () => {
+        if (currentHistoryPage > 1) viewPaymentHistory(currentHistoryPage - 1);
+    });
+    if (historyNextBtn) historyNextBtn.addEventListener('click', () => {
+        if (currentHistoryPage < totalHistoryPages) viewPaymentHistory(currentHistoryPage + 1);
+    });
+
+    if (routeSelect) {
+        routeSelect.addEventListener('change', updatePayButtonLabel);
+    }
+
+    // Load available shuttle routes
+    loadRoutes();
 
     // Check active server session on load
     checkSession();
 });
+
+function loadRoutes() {
+    fetch('/api/routes')
+        .then(res => res.json())
+        .then(data => {
+            if (data.success && Array.isArray(data.routes)) {
+                const select = document.getElementById('route-select');
+                if (!select) return;
+                // Preserve default option
+                select.innerHTML = '<option value="">Default Route (Standard 20 Credits)</option>';
+                data.routes.forEach(r => {
+                    const opt = document.createElement('option');
+                    opt.value = r.id;
+                    opt.textContent = `${r.name} (${r.fare} Credits)`;
+                    opt.dataset.fare = r.fare;
+                    select.appendChild(opt);
+                });
+            }
+        })
+        .catch(() => {});
+}
+
+function updatePayButtonLabel() {
+    const select = document.getElementById('route-select');
+    const label = document.getElementById('pay-btn-label');
+    if (!select || !label) return;
+
+    const selectedOpt = select.options[select.selectedIndex];
+    if (selectedOpt && selectedOpt.dataset && selectedOpt.dataset.fare) {
+        label.textContent = `Quick Tap & Pay (${selectedOpt.dataset.fare} credits)`;
+    } else {
+        label.textContent = 'Quick Tap & Pay (20 credits)';
+    }
+}
 
 let qrScannerInstance = null;
 
@@ -52,13 +106,13 @@ function startQrScanner() {
 
     qrScannerInstance.start(
         { facingMode: 'environment' },
-        { fps: 10, qrbox: { width: 250, height: 250 } },
+        { fps: 10, qrbox: { width: 220, height: 220 } },
         (decodedText) => {
             const studentIdInput = document.getElementById('student-id');
             if (studentIdInput) {
                 studentIdInput.value = decodedText.trim();
             }
-            showStatus('QR code scanned successfully: ' + decodedText.trim(), 'success');
+            showStatus('QR scanned successfully: ' + decodedText.trim(), 'success');
             stopQrScanner();
             const pinInput = document.getElementById('student-pin');
             if (pinInput) pinInput.focus();
@@ -66,7 +120,7 @@ function startQrScanner() {
         () => {}
     ).catch((err) => {
         console.error('Camera access error:', err);
-        showStatus('Camera access error. Please enter your student ID manually.', 'error');
+        showStatus('Camera access unavailable. Please enter student ID manually.', 'error');
         stopQrScanner();
     });
 }
@@ -161,7 +215,7 @@ function login() {
             if (adminLink) adminLink.style.display = data.isAdmin ? 'inline-block' : 'none';
             document.getElementById('login-section').style.display = 'none';
             document.getElementById('main-section').style.display = 'block';
-            showStatus('Login successful!', 'success');
+            showStatus('Welcome back, ' + (data.name || studentId) + '!', 'success');
         } else {
             showStatus(data.message || 'Login failed. Please try again.', 'error');
         }
@@ -176,18 +230,21 @@ function payForTrip() {
     let pin = document.getElementById('student-pin') ? document.getElementById('student-pin').value.trim() : '';
 
     if (!pin) {
-        pin = prompt('Please enter your PIN to authorize payment:');
+        pin = prompt('Please enter your 4-digit PIN to authorize payment:');
         if (!pin) {
             showStatus('Payment cancelled. PIN is required.', 'error');
             return;
         }
     }
 
+    const routeSelect = document.getElementById('route-select');
+    const routeId = routeSelect && routeSelect.value ? Number(routeSelect.value) : undefined;
+
     fetch('/api/pay', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'same-origin',
-        body: JSON.stringify({ pin: pin }), 
+        body: JSON.stringify({ pin: pin, routeId: routeId }),
     })
     .then(response => {
         if (!response.ok) {
@@ -209,8 +266,23 @@ function payForTrip() {
     });
 }
 
+function triggerDashboardPay() {
+    payForTrip();
+}
+
+function toggleOtpSection() {
+    const sec = document.getElementById('otp-section');
+    if (!sec) return;
+    sec.style.display = sec.style.display === 'none' ? 'block' : 'none';
+}
+
+function setPresetCredit(amount) {
+    const input = document.getElementById('credits-amount');
+    if (input) input.value = amount;
+}
+
 function addCredits() {
-    const credits = parseInt(document.getElementById('credits-amount').value);
+    const credits = parseInt(document.getElementById('credits-amount').value, 10);
     let pin = document.getElementById('credits-pin') ? document.getElementById('credits-pin').value.trim() : '';
 
     if (isNaN(credits) || credits < 1) {
@@ -238,6 +310,8 @@ function addCredits() {
             document.getElementById('credit-balance').textContent = data.newCredits;
             showStatus(data.message, 'success');
             hideAddCreditsModal();
+            document.getElementById('credits-amount').value = '';
+            if (document.getElementById('credits-pin')) document.getElementById('credits-pin').value = '';
         } else {
             showStatus(data.message || 'Failed to add credits. Please try again.', 'error');
         }
@@ -250,22 +324,17 @@ function addCredits() {
 
 function showAddCreditsModal() {
     const modal = document.getElementById('add-credits-modal');
-    if (!modal) {
-        console.error('Add Credits Modal not found in the DOM.');
-        return;
-    }
-    modal.style.display = 'block';
+    if (modal) modal.style.display = 'flex';
 }
 
 function hideAddCreditsModal() {
     const modal = document.getElementById('add-credits-modal');
-    if (modal) {
-        modal.style.display = 'none';
-    }
+    if (modal) modal.style.display = 'none';
 }
 
-function viewPaymentHistory() {
-    fetch('/api/payment-history?page=1&limit=20', {
+function viewPaymentHistory(page = 1) {
+    currentHistoryPage = page;
+    fetch(`/api/payment-history?page=${page}&limit=10`, {
         credentials: 'same-origin'
     })
     .then(response => response.json())
@@ -273,35 +342,49 @@ function viewPaymentHistory() {
         if (data.success) {
             const historyList = document.getElementById('history-list');
             historyList.innerHTML = '';
+            totalHistoryPages = Math.ceil((data.total || 1) / 10) || 1;
+            const pageInfo = document.getElementById('history-page-info');
+            if (pageInfo) pageInfo.textContent = `Page ${data.page} of ${totalHistoryPages} (${data.total} total)`;
+
             if (!data.history || data.history.length === 0) {
-                showStatus('No payment history found.', 'info');
-                return;
+                historyList.innerHTML = '<li style="justify-content:center; color:var(--text-muted);">No ride or payment history yet.</li>';
+            } else {
+                data.history.forEach(item => {
+                    const li = document.createElement('li');
+                    const isCreditAdd = (item.type || '').toLowerCase().includes('credit') || (item.type || '').toLowerCase().includes('deposit');
+                    const formattedDate = item.timestamp ? new Date(item.timestamp).toLocaleString() : '-';
+
+                    li.innerHTML = `
+                        <div class="history-item-details">
+                            <span class="history-type">${item.type}</span>
+                            <span class="history-time">${formattedDate}</span>
+                        </div>
+                        <div class="history-amount ${isCreditAdd ? 'amount-add' : 'amount-deduct'}">
+                            ${isCreditAdd ? '+' : '-'}${item.amount} credits
+                        </div>
+                    `;
+                    historyList.appendChild(li);
+                });
             }
-            data.history.forEach(item => {
-                const li = document.createElement('li');
-                li.textContent = `${item.timestamp}: ${item.type} - ${item.amount} credits`;
-                historyList.appendChild(li);
-            });
-            document.getElementById('history-modal').style.display = 'block';
+            const modal = document.getElementById('history-modal');
+            if (modal) modal.style.display = 'flex';
         } else {
             showStatus(data.message || 'Failed to fetch payment history.', 'error');
         }
     })
     .catch((error) => {
         console.error('Error:', error);
-        showStatus('An error occurred. Please try again later.', 'error');
+        showStatus('An error occurred while loading history.', 'error');
     });
 }
 
 function hideHistoryModal() {
     const modal = document.getElementById('history-modal');
-    if (modal) {
-        modal.style.display = 'none';
-    }
+    if (modal) modal.style.display = 'none';
 }
 
 function blockCard() {
-    if (!confirm('Are you sure you want to block your card? This action cannot be undone.')) {
+    if (!confirm('Are you sure you want to block your card? This will disable shuttle payments immediately.')) {
         return;
     }
 
@@ -349,18 +432,19 @@ function verifyOtpAndBlock() {
     .then(data => {
         const otpStatusDiv = document.getElementById('otp-status');
         if (data.success) {
-            otpStatusDiv.textContent = 'OTP verified successfully! Your card has been blocked.';
-            otpStatusDiv.className = 'success';
+            otpStatusDiv.textContent = 'OTP verified! Your card is now blocked.';
+            otpStatusDiv.style.color = '#34d399';
 
-            // Disable all buttons except Request New Card
-            document.querySelectorAll('.action-button').forEach(button => {
-                button.disabled = true;
-            });
-            const reqBtn = document.getElementById('request-new-card-btn') || document.getElementById('request-new-card-button');
-            if (reqBtn) reqBtn.disabled = false;
+            const badge = document.getElementById('card-status-badge');
+            if (badge) {
+                badge.className = 'card-status-pill status-pill-blocked';
+                badge.innerHTML = 'Blocked';
+            }
+            showStatus('Card blocked successfully.', 'success');
         } else {
             otpStatusDiv.textContent = data.message || 'Invalid OTP. Please try again.';
-            otpStatusDiv.className = 'error';
+            otpStatusDiv.style.color = '#fb7185';
+            showStatus(data.message || 'OTP verification failed.', 'error');
         }
     })
     .catch((error) => {
@@ -379,7 +463,7 @@ function requestNewCard() {
     .then(data => {
         if (data.success) {
             showStatus(data.message, 'success');
-            const otp = prompt(data.message + '\nPlease enter the OTP:');
+            const otp = prompt(data.message + '\nEnter verification OTP:');
             if (!otp) {
                 showStatus('Card reactivation cancelled.', 'error');
                 return;
@@ -395,9 +479,11 @@ function requestNewCard() {
             .then(verifyData => {
                 if (verifyData.success) {
                     showStatus(verifyData.message, 'success');
-                    document.querySelectorAll('.action-button').forEach(button => {
-                        button.disabled = false;
-                    });
+                    const badge = document.getElementById('card-status-badge');
+                    if (badge) {
+                        badge.className = 'card-status-pill status-pill-active';
+                        badge.innerHTML = '<span class="status-dot" style="width: 6px; height: 6px;"></span> Active';
+                    }
                 } else {
                     showStatus('Error renewing card: ' + verifyData.message, 'error');
                 }
@@ -431,16 +517,27 @@ function logout() {
         }
         document.getElementById('student-name').textContent = '';
         document.getElementById('credit-balance').textContent = '0';
-        showStatus('Logged out successfully.', 'success');
+        showStatus('Signed out successfully.', 'success');
     })
     .catch((error) => {
         console.error('Error logging out:', error);
-        showStatus('Logged out locally.', 'info');
+        showStatus('Signed out.', 'info');
     });
 }
 
 function showStatus(message, type) {
     const statusMessage = document.getElementById('statusMessage');
+    if (!statusMessage) return;
+
+    if (toastTimeout) {
+        clearTimeout(toastTimeout);
+    }
+
     statusMessage.textContent = message;
     statusMessage.className = type === 'error' ? 'status-error' : 'status-success';
+    statusMessage.style.display = 'block';
+
+    toastTimeout = setTimeout(() => {
+        statusMessage.style.display = 'none';
+    }, 3500);
 }
